@@ -295,8 +295,9 @@ def strategy_figure(al, rrg, book, value, bh_value, issue):
                         subplot_titles=("Price with buys and sells", "₹ value: strategy vs buy & hold", ""))
     fig.add_trace(go.Scatter(x=al.index, y=al["Close"], name="Close", line=dict(color=SERIES, width=2),
                              hovertemplate="%{x|%a %d %b %Y}<br>Close ₹%{y:.2f}<extra></extra>"), row=1, col=1)
-    fig.add_hline(y=issue, line=dict(color=INK_3, width=1, dash="dot"), row=1, col=1,
-                  annotation_text="Issue ₹%g" % issue, annotation_position="bottom right")
+    if issue:
+        fig.add_hline(y=issue, line=dict(color=INK_3, width=1, dash="dot"), row=1, col=1,
+                      annotation_text="Issue ₹%g" % issue, annotation_position="bottom right")
     if book:
         fig.add_trace(go.Scatter(x=[b["buy"] for b in book], y=[b["buy_px"] for b in book], mode="markers", name="Buy",
                                  marker=dict(symbol="triangle-up", size=13, color=UP_FG, line=dict(color="white", width=1)),
@@ -336,14 +337,16 @@ def strategy_figure(al, rrg, book, value, bh_value, issue):
 def coverage(token):
     rows = []
     for s, name, *_ in STOCKS:
+        tags = ", ".join(INFO[s]["tags"])
         got = safe_load(s, token)
         if got is None:
-            rows.append({"Stock": name, "Symbol": s, "Sector": an.sector(s), "Status": "NO DATA"})
+            rows.append({"Stock": name, "Symbol": s, "Tags": tags, "Sector": an.sector(s),
+                         "Status": "NEEDS NSE CSV" if INFO[s]["source"] == "nse_csv" else "NO DATA"})
             continue
         al = got[0]
         v = an.validate(al, INFO[s]["listed"])
         exp = an.expected_latest_session(an.now_ist())
-        rows.append({"Stock": name, "Symbol": s, "Sector": an.sector(s), "Rows": v["rows"],
+        rows.append({"Stock": name, "Symbol": s, "Tags": tags, "Sector": an.sector(s), "Rows": v["rows"],
                      "First date": v["first"].strftime("%d %b %Y"), "Latest date": v["last"].strftime("%d %b %Y"),
                      "Status": "LIVE" if v["last"] >= exp else "STALE",
                      "Checks": "%d/%d pass" % (sum(ok for _, ok in v["checks"]), len(v["checks"])),
@@ -358,7 +361,7 @@ def data_panel(sym, al, note, fetched, token):
     with st.expander("📊 Data Status & Validation Panel", expanded=False):
         c1, c2, c3, c4 = st.columns(4)
         c1.markdown("**Selected stock:** %s" % INFO[sym]["name"])
-        c1.caption("Ticker: `%s.NS` · Benchmark: `%s`" % (sym, BENCH))
+        c1.caption("Ticker: `%s` · Tags: %s · Benchmark: `%s`" % (INFO[sym]["ticker"], ", ".join(INFO[sym]["tags"]), BENCH))
         c2.markdown("**Last sync:** %s IST" % fetched.strftime("%d %b %Y %H:%M"))
         c2.caption("Provider: %s" % note)
         status = "LIVE" if v["last"] >= exp else "STALE"
@@ -370,6 +373,9 @@ def data_panel(sym, al, note, fetched, token):
         st.markdown("**Validation checks for %s** (%d rows, %s → %s):"
                     % (INFO[sym]["name"], v["rows"], v["first"].strftime("%d %b %Y"), v["last"].strftime("%d %b %Y")))
         st.markdown("  ".join("%s %s" % ("✅" if ok else "❌", label) for label, ok in v["checks"]))
+        if v["weekend"]:
+            st.caption("Weekend sessions in the data (NIFTY 50 traded too, so they are real special sessions): %s"
+                       % ", ".join(v["weekend"]))
         if v["first_vs_listing"] != 0:
             st.caption("First data row is %d day(s) after the listing date in the stock list." % v["first_vs_listing"])
         if v["flagged"]:
@@ -377,7 +383,7 @@ def data_panel(sym, al, note, fetched, token):
             st.dataframe(pd.DataFrame(v["flagged"]), hide_index=True)
         else:
             st.caption("No one-day move larger than ±%g%%." % an.SUSPICIOUS_MOVE_PCT)
-        st.markdown("**All 20 stocks — coverage & alignment:**")
+        st.markdown("**All %d stocks — coverage & alignment:**" % len(STOCKS))
         st.dataframe(coverage(token), hide_index=True, width="stretch")
 
 
@@ -387,8 +393,11 @@ if "token" not in st.session_state:
 with st.sidebar:
     st.header("IPO Daily RRG")
     page = st.radio("Page", ["Daily RRG", "Strategy", "All stocks", "Rules"], horizontal=True)
-    labels = {s: "%d. %s (%s)" % (i + 1, n, an.sector(s)) for i, (s, n, *_) in enumerate(STOCKS)}
-    sym = st.selectbox("Stock", [s for s, *_ in STOCKS], format_func=labels.get)
+    tag = st.selectbox("Tag", ["All"] + core.TAGS,
+                       format_func=lambda t: "%s (%d)" % (t, len(core.stocks_for_tag(t))))
+    tag_syms = core.stocks_for_tag(tag)
+    labels = {s: "%d. %s (%s)" % (i + 1, INFO[s]["name"], an.sector(s)) for i, s in enumerate(tag_syms)}
+    sym = st.selectbox("Stock", tag_syms, format_func=labels.get)
     tail_n = st.slider("Tail length (sessions)", 3, 40, 10)
     chart_h = st.slider("Chart height (px)", 380, 800, 500, 20)
     full_w = st.toggle("Full-width chart", value=False)
@@ -414,23 +423,46 @@ def chart_frame(html):
             st.iframe(html, height=chart_h)
 
 
-got = safe_load(sym, token)
-if got is None:
-    st.error("No price data for %s and no saved copy. Check the internet connection and press Refresh." % sym)
-    st.stop()
-al, rrg, warm, note, fetched = got
 info = INFO[sym]
 sec, ind, city = an.PROFILE.get(sym, ("—", "—", "—"))
-trades, pend, pend_x = core.run_strategy(rrg, stop_loss, cost) if not rrg.empty else ([], None, None)
+got = safe_load(sym, token)
+if got is None and page in ("Daily RRG", "Strategy"):
+    st.markdown("#### %s (%s)" % (info["name"], sym))
+    if sym in an.NOTES:
+        st.caption("ℹ️ " + an.NOTES[sym])
+    if info["source"] == "nse_csv":
+        st.warning("**%s is an NSE SME stock — Yahoo Finance has no price history for it.** To add it:" % info["name"])
+        st.markdown("""
+1. Open **nseindia.com**, search **%s**, and open its quote page.
+2. Go to **Historical Data**, choose the series **SM** / **ST**, and pick a date range (NSE allows about one year
+   per download). Start from the listing date, **%s**.
+3. Click **Download (.csv)**. Repeat for each year up to today.
+4. Put the files in the app folder under `data/nse_csv/`, named starting with **%s** — for example
+   `%s_2025.csv`, `%s_2026.csv`.
+5. Press **Refresh data now** in the sidebar.
+
+NSE prices are as traded (not adjusted for splits or bonuses); the validation panel flags any one-day move over ±25%%.
+""" % (sym, info["listed"].strftime("%d %b %Y"), sym, sym, sym))
+    else:
+        st.error("No price data for %s and no saved copy. Check the internet connection and press Refresh." % sym)
+    st.stop()
+if got is not None:
+    al, rrg, warm, note, fetched = got
+    trades, pend, pend_x = core.run_strategy(rrg, stop_loss, cost) if not rrg.empty else ([], None, None)
+
+
+def issue_text(i):
+    if not i["issue"]:
+        return "no IPO issue price"
+    return "issue ₹%g%s" % (i["issue"], " · issue size ₹%s cr" % format(i["size"], ",.2f") if i["size"] else "")
 
 
 def stock_header(title):
     now = an.now_ist()
     st.markdown("#### %s (%s) against %s — %s" % (info["name"], sym, BENCH, title))
-    st.caption("%s · %s · %s, %s · listed %s · issue ₹%g · issue size ₹%s cr · %d sessions · first %d used as "
-               "EMA warm-up · %s" % ("🟢 NSE open" if an.market_open(now) else "⚪ NSE closed", sec, ind, city,
-                                     info["listed"].strftime("%d %b %Y"), info["issue"], format(info["size"], ",.2f"),
-                                     len(al), warm, note))
+    st.caption("%s · %s · %s, %s · tags: %s · listed %s · %s · %d sessions · first %d used as EMA warm-up · %s"
+               % ("🟢 NSE open" if an.market_open(now) else "⚪ NSE closed", sec, ind, city, ", ".join(info["tags"]),
+                  info["listed"].strftime("%d %b %Y"), issue_text(info), len(al), warm, note))
     if sym in an.NOTES:
         st.caption("ℹ️ " + an.NOTES[sym])
 
@@ -453,8 +485,8 @@ if page == "Daily RRG":
               delta_color="off")
     c2.metric("RS-Ratio", "%.2f" % last["RS_Ratio"], "%+.2f" % (last["RS_Ratio"] - prev["RS_Ratio"]))
     c3.metric("RS-Momentum", "%.2f" % last["RS_Momentum"], "%+.2f" % (last["RS_Momentum"] - prev["RS_Momentum"]))
-    c4.metric("Close", "₹%.2f" % last["Close"], "%+.2f%% vs previous · %+.1f%% vs issue"
-              % (100 * (last["Close"] / prev["Close"] - 1), 100 * (last["Close"] / info["issue"] - 1)))
+    c4.metric("Close", "₹%.2f" % last["Close"], "%+.2f%% vs previous" % (100 * (last["Close"] / prev["Close"] - 1))
+              + (" · %+.1f%% vs issue" % (100 * (last["Close"] / info["issue"] - 1)) if info["issue"] else ""))
     chart_frame(rrg_html(sym, token, tail_n, fixed, stop_loss, cost))
     st.caption("Drag the slider under the chart to move the tail back and forward, or click the chart and use ← / →. "
                "Dots are coloured by the quadrant of their own day; the big dot is the selected session.")
@@ -646,22 +678,26 @@ elif page == "Strategy":
 
 # ================================================================ ALL STOCKS PAGE
 elif page == "All stocks":
-    st.markdown("#### All 20 IPOs — Daily RRG against %s" % BENCH)
-    sectors = sorted({an.sector(s) for s, *_ in STOCKS})
-    pick = st.multiselect("Filter by sector (tag)", sectors, default=sectors)
-    syms = [s for s, *_ in STOCKS if an.sector(s) in pick]
+    st.markdown("#### %s — Daily RRG against %s" % ("All stocks" if tag == "All" else "Tag: " + tag, BENCH))
+    st.caption("Change the tag in the sidebar to switch groups.")
+    sectors = sorted({an.sector(s) for s in tag_syms})
+    pick = st.multiselect("Filter by sector", sectors, default=sectors)
+    syms = [s for s in tag_syms if an.sector(s) in pick]
     rows = []
     for s in syms:
         g = safe_load(s, token)
         name = INFO[s]["name"]
-        base = {"Stock": name, "Symbol": s, "Sector": an.sector(s), "Listed": INFO[s]["listed"].strftime("%d %b %Y")}
+        base = {"Stock": name, "Symbol": s, "Tags": ", ".join(INFO[s]["tags"]), "Sector": an.sector(s),
+                "Listed": INFO[s]["listed"].strftime("%d %b %Y")}
         if g is None:
-            rows.append(dict(base, Note="No data"))
+            rows.append(dict(base, Note="NSE SME stock — add NSE CSV files" if INFO[s]["source"] == "nse_csv"
+                             else "No data"))
             continue
         a, r = g[0], g[1]
         last_px = a["Close"].iloc[-1]
-        base.update({"Issue ₹": INFO[s]["issue"], "Last ₹": round(last_px, 2),
-                     "Gain vs issue": pct(100 * (last_px / INFO[s]["issue"] - 1))})
+        iss = INFO[s]["issue"]
+        base.update({"Issue ₹": iss if iss else None, "Last ₹": round(last_px, 2),
+                     "Gain vs issue": pct(100 * (last_px / iss - 1)) if iss else "—"})
         if r.empty:
             rows.append(dict(base, Note="Only %d sessions — too few for RRG" % len(a)))
             continue

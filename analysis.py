@@ -35,10 +35,27 @@ PROFILE = {
     "STEAMHOUSE": ("Utilities", "Industrial steam & gas utility", "Surat"),
     "PNGSREVA": ("Consumer Cyclical", "Jewellery (Luxury Goods)", "Pune"),
     "KANOHAR": ("Industrials", "Electrical Equipment & Parts", "Meerut"),
+    # Robotics and Automation
+    "KAYNES": ("Technology", "Electronic Components (EMS)", "Mysuru"),
+    "OBSCP": ("Industrials", "Precision engineered components", "—"),
+    "SKFINDUS": ("Industrials", "Bearings & industrial tools", "Pune"),
+    "PATILAUTOM": ("Industrials", "Industrial automation", "Pune"),
+    "AFFORDABLE": ("Industrials", "Robotics & automation machinery", "Pune"),
+    "BONFIG": ("Industrials", "Gearboxes & drives (Specialty Machinery)", "Kanchipuram"),
 }
 NOTES = {
     "RAMBHAJO": "Advit Jewels trades on NSE as RAMBHAJO (data starts on its 1 Jul 2026 listing day).",
     "TONBO": "Listed 23 Oct 2026 - too few sessions for a Daily RRG yet.",
+    "BONFIG": "Listed 23 Oct 2026 - too few sessions for a Daily RRG yet.",
+    "KAYNES": "Mainboard IPO, Nov 2022 (issue ₹587).",
+    "SKFINDUS": "Not an IPO: listed on 5 Dec 2025 after the demerger from SKF India (1 share per SKF India "
+                "share), so there is no issue price.",
+    "AFFORDABLE": "IPO on BSE SME, Jun 2018 at ₹85; Yahoo's NSE price history starts 23 Oct 2024, so the RRG "
+                  "starts from there.",
+    "OBSCP": "NSE SME stock (IPO Oct 2024 at ₹100). Yahoo has no price history for SME stocks - add NSE CSV "
+             "files (see below).",
+    "PATILAUTOM": "NSE SME stock (IPO Jun 2025 at ₹120). Yahoo has no price history for SME stocks - add NSE CSV "
+                  "files (see below).",
 }
 
 
@@ -78,9 +95,11 @@ def validate(al, listed):
         ("Dates in order", bool(al.index.is_monotonic_increasing)),
         ("No dates before listing", bool(al.index[0] >= listed)),
         ("Latest date not in the future", bool(al.index[-1].date() <= now_ist().date())),
-        ("No weekend dates", bool((al.index.dayofweek < 5).all())),
     ]
-    weekend = [d.strftime("%a %d %b %Y") for d in al.index[al.index.dayofweek >= 5]]
+    # a weekend row is a real special session (e.g. Union Budget Sat 1 Feb 2025) only if NIFTY 50 traded too
+    wk = al.index[al.index.dayofweek >= 5]
+    checks.append(("Weekend dates only on real sessions", bool(al.loc[wk, "Bench"].notna().all()) if "Bench" in al else len(wk) == 0))
+    weekend = [d.strftime("%a %d %b %Y") for d in wk]
     return dict(rows=len(al), first=al.index[0], last=al.index[-1], flagged=flagged, checks=checks,
                 weekend=weekend, first_vs_listing=(al.index[0] - listed).days)
 

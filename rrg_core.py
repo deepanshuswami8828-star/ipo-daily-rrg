@@ -42,9 +42,15 @@ SERIES = "#2a78d6"
 QUAD_BG = {"Leading": "#edf4ee", "Weakening": "#f7f3e8", "Lagging": "#f8eeee", "Improving": "#ebf1f8"}
 QUAD_FG = {"Leading": "#3f7d55", "Weakening": "#8a6d2f", "Lagging": "#a05252", "Improving": "#4a6c96"}
 
+# ---- tags ----------------------------------------------------------------------
+# A stock can carry several tags. To add a tag: give it a name here, then add it to the stocks' tag lists.
+TAG_TOP20 = "Top 20 IPO 2026"
+TAG_ROBOTICS = "Robotics and Automation"
+TAGS = [TAG_TOP20, TAG_ROBOTICS]
+
 # ---- the 20 IPOs (verified on Chittorgarh, prices as of 6-9 Nov 2026) --------
 # symbol, name, listing date, issue price, issue size (Rs cr)
-STOCKS = [
+TOP20 = [
     ("INDOMIM", "Indo-MIM", "2026-07-30", 485, 3812.11),
     ("ESDS", "ESDS Software Solution", "2026-09-04", 429, 720.00),
     ("OMNI", "Omnitech Engineering", "2026-03-05", 227, 583.00),
@@ -66,7 +72,32 @@ STOCKS = [
     ("PNGSREVA", "PNGS Reva Diamond Jewellery", "2026-03-04", 386, 379.52),
     ("KANOHAR", "Kanohar Electricals", "2026-09-16", 632, 1055.74),
 ]
-INFO = {s: dict(symbol=s, name=n, listed=pd.Timestamp(l), issue=float(i), size=z) for s, n, l, i, z in STOCKS}
+
+# ---- Robotics and Automation (added 10 Nov 2026; details from Chittorgarh / NSE) ----
+# symbol, name, listing date, issue price (None = not an IPO), issue size (Rs cr, None = unknown),
+# data ticker, data source ("yahoo", or "nse_csv" = NSE SME stock: Yahoo has no history, use NSE CSV files)
+ROBOTICS = [
+    ("KAYNES", "Kaynes Technology India", "2022-11-22", 587, 857.82, "KAYNES.NS", "yahoo"),
+    ("OBSCP", "OBSC Perfection", "2024-10-29", 100, None, "OBSCP", "nse_csv"),
+    ("SKFINDUS", "SKF India (Industrial)", "2025-12-05", None, None, "SKFINDUS.NS", "yahoo"),
+    ("PATILAUTOM", "Patil Automation", "2025-06-23", 120, 69.61, "PATILAUTOM", "nse_csv"),
+    ("AFFORDABLE", "Affordable Robotic & Automation", "2018-06-04", 85, None, "AFFORDABLE.NS", "yahoo"),
+    ("BONFIG", "Bonfiglioli Transmissions", "2026-10-23", 586, 2533.67, "BONFIG.NS", "yahoo"),
+]
+
+STOCKS = [(s, n) for s, n, *_ in TOP20] + [(s, n) for s, n, *_ in ROBOTICS]
+INFO = {}
+for s, n, l, i, z in TOP20:
+    INFO[s] = dict(symbol=s, name=n, listed=pd.Timestamp(l), issue=float(i), size=z,
+                   ticker=s + ".NS", source="yahoo", tags=[TAG_TOP20])
+for s, n, l, i, z, t, src in ROBOTICS:
+    INFO[s] = dict(symbol=s, name=n, listed=pd.Timestamp(l), issue=float(i) if i else None, size=z,
+                   ticker=t, source=src, tags=[TAG_ROBOTICS])
+
+
+def stocks_for_tag(tag):
+    """Symbols carrying `tag` (None or "All" = every stock), in list order."""
+    return [s for s, _ in STOCKS if tag in (None, "All") or tag in INFO[s]["tags"]]
 
 
 # ---- data ---------------------------------------------------------------------
@@ -110,9 +141,46 @@ def get_prices(ticker, force=False):
     return d, note
 
 
+MANUAL = os.path.join(DATA, "nse_csv")
+os.makedirs(MANUAL, exist_ok=True)
+
+
+def _num(col):
+    return pd.to_numeric(col.astype(str).str.replace(",", "").str.strip(), errors="coerce")
+
+
+def nse_csv_prices(symbol):
+    """Prices from CSV files downloaded by hand from nseindia.com (quote page -> Historical Data ->
+    Download .csv), saved as data/nse_csv/<SYMBOL>*.csv. Several files (one per year) are merged.
+    NSE files are as-traded prices (not adjusted for splits/bonus)."""
+    import glob
+    files = sorted(glob.glob(os.path.join(MANUAL, symbol + "*.csv")))
+    if not files:
+        raise RuntimeError("NSE_CSV_MISSING")
+    parts = []
+    for f in files:
+        d = pd.read_csv(f)
+        d.columns = [str(c).strip().lower().replace("﻿", "") for c in d.columns]
+        dcol = next(c for c in d.columns if "date" in c)
+        ocol = next(c for c in d.columns if c in ("open", "open price", "ch_opening_price"))
+        ccol = next(c for c in d.columns if c in ("close", "close price", "ch_closing_price"))
+        p = pd.DataFrame({"Open": _num(d[ocol]), "Close": _num(d[ccol])})
+        p.index = pd.to_datetime(d[dcol].astype(str).str.strip(), format="mixed", dayfirst=True)
+        parts.append(p)
+    d = pd.concat(parts).dropna()
+    d = d[(d > 0).all(axis=1)]
+    d = d[~d.index.duplicated(keep="last")].sort_index()
+    d.index.name = "Date"
+    return d, "NSE CSV files (%d) in data/nse_csv" % len(files)
+
+
 def aligned(symbol, force=False):
     """Stock Open/Close + NIFTY 50 Close on the dates both traded (inner join, no fill)."""
-    s, note = get_prices(symbol + ".NS", force)
+    info = INFO[symbol]
+    if info["source"] == "nse_csv":
+        s, note = nse_csv_prices(symbol)
+    else:
+        s, note = get_prices(info["ticker"], force)
     b, _ = get_prices(BENCH_TICKER, force)
     al = s.join(b[["Close"]].rename(columns={"Close": "Bench"}), how="inner").dropna()
     return al, note
