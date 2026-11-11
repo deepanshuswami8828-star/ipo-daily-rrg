@@ -37,6 +37,16 @@ st.set_page_config(page_title="IPO Daily RRG", page_icon="📈", layout="wide")
 st.markdown("""<style>.block-container{padding-top:1.2rem;padding-bottom:1rem}
 div[data-testid="stMetricValue"]{font-size:1.35rem}</style>""", unsafe_allow_html=True)
 
+# Top navigation, as in the help folder app: "RRG charts" is the rest of this script, "Tags analysis" its own page.
+nav = st.navigation([
+    st.Page(lambda: None, title="RRG charts", icon="📈", url_path="rrg", default=True),
+    st.Page("tags_analysis.py", title="Tags analysis", icon="🏷️", url_path="tags"),
+    st.Page("vintage_analysis.py", title="Vintage", icon="📅", url_path="vintage"),
+], position="top")
+nav.run()
+if nav.url_path in ("tags", "vintage"):
+    st.stop()
+
 
 def inr(v, sign=False):
     s = "₹" + format(abs(round(v)), ",d")
@@ -66,15 +76,15 @@ def status_box(color, title, lines):
 
 # ---- data (cached) ------------------------------------------------------------
 @st.cache_data(show_spinner="Loading prices...")
-def load(symbol, token):
+def load(symbol, token, sma=0):
     al, note = core.aligned(symbol, force=token > 0)
-    rrg, warm = core.daily_rrg(al)
+    rrg, warm = core.daily_rrg(al, sma)
     return al, rrg, warm, note, an.now_ist()
 
 
-def safe_load(symbol, token):
+def safe_load(symbol, token, sma=0):
     try:
-        return load(symbol, token)
+        return load(symbol, token, sma)
     except Exception:
         return None
 
@@ -193,17 +203,17 @@ def to_html(fig):
 
 
 @st.cache_data(max_entries=8, show_spinner="Building the RRG chart...")
-def rrg_html(symbol, token, tail_n, fixed, stop_loss, cost):
-    _, rrg, *_ = load(symbol, token)
+def rrg_html(symbol, token, tail_n, fixed, stop_loss, cost, sma=0):
+    _, rrg, *_ = load(symbol, token, sma)
     trades, _, _ = core.run_strategy(rrg, stop_loss, cost)
     return to_html(rrg_figure(rrg, tail_n, fixed, trades))
 
 
 @st.cache_data(max_entries=4, show_spinner="Building the multi-stock RRG...")
-def multi_html(symbols, token, tail_n, sessions):
+def multi_html(symbols, token, tail_n, sessions, sma=0):
     data = {}
     for s in symbols:
-        got = safe_load(s, token)
+        got = safe_load(s, token, sma)
         if got is not None and len(got[1]) >= 10:
             data[s] = got[1]
     if not data:
@@ -391,21 +401,27 @@ def data_panel(sym, al, note, fetched, token):
 if "token" not in st.session_state:
     st.session_state.token = 0
 with st.sidebar:
-    st.header("IPO Daily RRG")
-    page = st.radio("Page", ["Daily RRG", "Strategy", "All stocks", "Rules"], horizontal=True)
-    tag = st.selectbox("Tag", ["All"] + core.TAGS,
-                       format_func=lambda t: "%s (%d)" % (t, len(core.stocks_for_tag(t))))
-    tag_syms = core.stocks_for_tag(tag)
-    labels = {s: "%d. %s (%s)" % (i + 1, INFO[s]["name"], an.sector(s)) for i, s in enumerate(tag_syms)}
-    sym = st.selectbox("Stock", tag_syms, format_func=labels.get)
+    # as in the help folder app: the RRG pages list every stock; tags have their own "Tags analysis" tab
+    st.header("Stock & View Selection")
+    all_syms = [s for s, _ in STOCKS]
+    labels = {s: "%d. %s (%s)" % (i + 1, INFO[s]["name"], an.sector(s)) for i, s in enumerate(all_syms)}
+    sym = st.selectbox("Select Stock", all_syms, format_func=labels.get, key="stock")
+    st.caption("**Selected:** %s · Sector: *%s* · Tags: %s" % (INFO[sym]["name"], an.sector(sym), ", ".join(INFO[sym]["tags"])))
+    page = st.radio("Page", ["Daily RRG", "Strategy", "All stocks", "Rules"], key="page")
+    st.divider()
     tail_n = st.slider("Tail length (sessions)", 3, 40, 10)
     chart_h = st.slider("Chart height (px)", 380, 800, 500, 20)
     full_w = st.toggle("Full-width chart", value=False)
     fixed = st.toggle("Fixed axes while sliding", value=False,
                       help="Off: each date framed on its own trail. On: one scale for the whole slider.")
     st.divider()
+    basis = st.radio("RRG built on", ["Daily close", "SMA price"], horizontal=True,
+                     help="Daily close: RS = stock close ÷ NIFTY close (original).  SMA price: RS = stock N-day SMA "
+                          "÷ NIFTY N-day SMA — smoother, fewer false signals, but slower. Trades always use real prices.")
+    sma = int(st.number_input("SMA days", 2, 200, core.SMA_DEFAULT, 1)) if basis == "SMA price" else 0
+    st.divider()
     capital = st.number_input("Amount (₹)", 1000.0, 1e8, 100000.0, 10000.0, format="%.0f")
-    stop_loss = st.number_input("Stop-loss (%)", 1.0, 50.0, core.STOP_LOSS_PCT, 0.5)
+    stop_loss = st.radio("Stop-loss", core.STOP_LOSS_OPTIONS, horizontal=True, format_func=lambda v: "%g%%" % v)
     cost = st.number_input("Charges per side (%)", 0.0, 1.0, core.COST_PCT, 0.01)
     if st.button("Refresh data now", width="stretch"):
         st.session_state.token += 1
@@ -425,7 +441,8 @@ def chart_frame(html):
 
 info = INFO[sym]
 sec, ind, city = an.PROFILE.get(sym, ("—", "—", "—"))
-got = safe_load(sym, token)
+got = safe_load(sym, token, sma)
+BASIS = ("SMA %d price" % sma) if sma else "daily close"
 if got is None and page in ("Daily RRG", "Strategy"):
     st.markdown("#### %s (%s)" % (info["name"], sym))
     if sym in an.NOTES:
@@ -469,7 +486,7 @@ def stock_header(title):
 
 # ================================================================ DAILY RRG PAGE
 if page == "Daily RRG":
-    stock_header("daily RRG since listing")
+    stock_header("daily RRG since listing · built on %s" % BASIS)
     data_panel(sym, al, note, fetched, token)
     if rrg.empty:
         st.warning("%s has only %d sessions since listing — too few for a Daily RRG. Check back later."
@@ -487,7 +504,7 @@ if page == "Daily RRG":
     c3.metric("RS-Momentum", "%.2f" % last["RS_Momentum"], "%+.2f" % (last["RS_Momentum"] - prev["RS_Momentum"]))
     c4.metric("Close", "₹%.2f" % last["Close"], "%+.2f%% vs previous" % (100 * (last["Close"] / prev["Close"] - 1))
               + (" · %+.1f%% vs issue" % (100 * (last["Close"] / info["issue"] - 1)) if info["issue"] else ""))
-    chart_frame(rrg_html(sym, token, tail_n, fixed, stop_loss, cost))
+    chart_frame(rrg_html(sym, token, tail_n, fixed, stop_loss, cost, sma))
     st.caption("Drag the slider under the chart to move the tail back and forward, or click the chart and use ← / →. "
                "Dots are coloured by the quadrant of their own day; the big dot is the selected session.")
 
@@ -549,12 +566,13 @@ if page == "Daily RRG":
         st.dataframe(table.style.apply(quad_style, subset=["Quadrant"]), hide_index=True, width="stretch", height=450)
         st.download_button("Download as CSV", rrg.to_csv(float_format="%.4f"),
                            file_name="rrg_%s_daily.csv" % sym.lower(), mime="text/csv")
-    st.caption("RS-Ratio = 100 × EMA(SMA(RS,5),5) / EMA(SMA(RS,5),30) · RS-Momentum = 100 × EMA(RS-Ratio,3) / "
+    st.caption(("RS = SMA%d(stock) ÷ SMA%d(NIFTY) · " % (sma, sma) if sma else "RS = close ÷ NIFTY close · ") +
+               "RS-Ratio = 100 × EMA(SMA(RS,5),5) / EMA(SMA(RS,5),30) · RS-Momentum = 100 × EMA(RS-Ratio,3) / "
                "EMA(RS-Ratio,14) · periods are sessions · Yahoo quotes may lag the exchange by a few minutes")
 
 # ================================================================ STRATEGY PAGE
 elif page == "Strategy":
-    stock_header("strategy (Daily RRG)")
+    stock_header("strategy (Daily RRG on %s, %g%% stop-loss)" % (BASIS, stop_loss))
     data_panel(sym, al, note, fetched, token)
     st.markdown(
         "<div style='background:%s;border:1px solid %s;border-left:5px solid %s;padding:14px 18px;border-radius:8px;"
@@ -564,7 +582,7 @@ elif page == "Strategy":
         "%g%% Stop-Loss</span><span style='background:#e8f5e9;color:#2e7d32;padding:3px 10px;border-radius:12px;"
         "font-size:0.82rem;font-weight:600'>Daily Only</span></div>"
         "<div style='margin-top:6px;color:%s;font-size:0.93rem'><b>Kya karti hai:</b> Har trading din ka Daily RRG "
-        "dekhti hai. Leading/Improving me buy, Weakening/Lagging me sell, aur close buy price se %g%% neeche gaya to "
+        "(<b>%s</b> par bana) dekhti hai. Leading/Improving me buy, Weakening/Lagging me sell, aur close buy price se %g%% neeche gaya to "
         "stop-loss. Weekly RRG use nahi hota. Charges %.2f%% har side.</div>"
         "<div style='margin-top:10px;display:grid;grid-template-columns:1fr 1fr;gap:12px'>"
         "<div style='background:#f1f8e9;padding:10px 14px;border-radius:6px'><b style='color:#2e7d32'>🟢 Kharidne ka "
@@ -578,7 +596,7 @@ elif page == "Strategy":
         "color:%s'>🎯 <b>Kab accha kaam karegi:</b> jab naya IPO lagatar NIFTY se behtar chal raha ho.<br>"
         "⚠️ <b>Savdhani:</b> Daily RRG jaldi badalta hai, isliye jhoote signal zyada aate hain; gap-down par loss %g%% "
         "se thoda zyada ho sakta hai; naye IPO me data kam hai.</div></div>"
-        % (SURFACE, GRID, UP_FG, INK_1, stop_loss, INK_2, stop_loss, cost, 100 - stop_loss, INK_2, stop_loss),
+        % (SURFACE, GRID, UP_FG, INK_1, stop_loss, INK_2, BASIS, stop_loss, cost, 100 - stop_loss, INK_2, stop_loss),
         unsafe_allow_html=True)
     if rrg.empty:
         st.warning("%s has only %d sessions — not enough for the Daily RRG strategy yet." % (info["name"], len(al)))
@@ -678,14 +696,16 @@ elif page == "Strategy":
 
 # ================================================================ ALL STOCKS PAGE
 elif page == "All stocks":
-    st.markdown("#### %s — Daily RRG against %s" % ("All stocks" if tag == "All" else "Tag: " + tag, BENCH))
-    st.caption("Change the tag in the sidebar to switch groups.")
+    st.markdown("#### All Stocks Comparison (Daily RRG on %s) against %s" % (BASIS, BENCH))
+    c1, c2 = st.columns(2)
+    tag = c1.selectbox("Show tag", ["All"] + core.TAGS, format_func=lambda t: "%s (%d)" % (t, len(core.stocks_for_tag(t))))
+    tag_syms = core.stocks_for_tag(tag)
     sectors = sorted({an.sector(s) for s in tag_syms})
-    pick = st.multiselect("Filter by sector", sectors, default=sectors)
+    pick = c2.multiselect("Filter by sector", sectors, default=sectors)
     syms = [s for s in tag_syms if an.sector(s) in pick]
     rows = []
     for s in syms:
-        g = safe_load(s, token)
+        g = safe_load(s, token, sma)
         name = INFO[s]["name"]
         base = {"Stock": name, "Symbol": s, "Tags": ", ".join(INFO[s]["tags"]), "Sector": an.sector(s),
                 "Listed": INFO[s]["listed"].strftime("%d %b %Y")}
@@ -724,7 +744,7 @@ elif page == "All stocks":
     c1, c2 = st.columns(2)
     m_tail = c1.slider("Tail (sessions)", 3, 20, 8, key="mtail")
     m_sess = c2.slider("Slider covers last N sessions", 20, 200, 60, 10, key="msess")
-    html = multi_html(tuple(syms), token, m_tail, m_sess)
+    html = multi_html(tuple(syms), token, m_tail, m_sess, sma)
     if html is None:
         st.warning("No selected stock has enough history for the RRG.")
     else:
@@ -738,6 +758,10 @@ else:
     st.markdown("""
 #### How the Daily RRG is calculated
 - **RS** = stock close ÷ NIFTY 50 close (only dates both traded; nothing filled in)
+- **SMA price option** (sidebar → *RRG built on* → *SMA price*): RS = N-day SMA of the stock close ÷ N-day SMA of the
+  NIFTY 50 close (14 days by default). The rest of the formula is the same. This smooths out day-to-day noise, so
+  quadrants change less often (fewer false buys/sells), but signals come a few days later. Buys, sells and the
+  stop-loss still use the real prices, and the RRG starts on the same date as the daily-close version.
 - **RS-Ratio** = 100 × EMA(SMA(RS, 5), 5) ÷ EMA(SMA(RS, 5), 30)
 - **RS-Momentum** = 100 × EMA(RS-Ratio, 3) ÷ EMA(RS-Ratio, 14)
 - Quadrants: **Leading** (Ratio ≥ 100, Momentum ≥ 100), **Weakening** (Ratio ≥ 100, Momentum < 100),
@@ -750,7 +774,7 @@ else:
   average of that day's open and close.
 - **Sell** on the first day the Daily RRG is in **Weakening** or **Lagging**: sold on the next trading day at the
   average of its open and close.
-- **Stop-loss:** any day's close at or below the buy price minus the stop-loss % (10% by default) sells that day at that
+- **Stop-loss:** any day's close at or below the buy price minus the stop-loss % (10% or 15%, chosen in the sidebar) sells that day at that
   close. After a stop-loss it buys again only after the Daily RRG has gone into Weakening/Lagging and come back up.
 - One position at a time, whole shares, charges per side as set in the sidebar.
 

@@ -3,7 +3,8 @@ rem Starts the 2026 IPO Daily RRG app and opens it in the browser.
 title IPO Daily RRG app - keep this window open while using the app
 cd /d "%~dp0"
 
-set PORT=8502
+rem 8510: own port, so it never clashes with the other RRG apps (8501 / 8502)
+set PORT=8510
 set URL=http://localhost:%PORT%
 set PY=C:\Users\Lenovo\AppData\Local\Python\pythoncore-3.14-64\python.exe
 if not exist "%PY%" set PY=python

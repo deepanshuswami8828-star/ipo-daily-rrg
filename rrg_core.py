@@ -30,6 +30,8 @@ os.makedirs(DATA, exist_ok=True)
 RS_PRESMOOTH, RS_SHORT, RS_LONG, MOM_SHORT, MOM_LONG = 5, 5, 30, 3, 14
 WARMUP_DAILY = 200          # capped at len // 3 for short histories, as in the help folder
 STOP_LOSS_PCT = 10.0
+STOP_LOSS_OPTIONS = (10.0, 15.0)
+SMA_DEFAULT = 14            # days, for the "SMA price" RRG option
 COST_PCT = 0.12             # charges per side (%)
 
 BENCH_TICKER, BENCH = "^NSEI", "NIFTY 50"
@@ -141,6 +143,33 @@ def get_prices(ticker, force=False):
     return d, note
 
 
+def get_ohlcv(ticker, force=False):
+    """Open/High/Low/Close/Volume for the realistic trade replay. Kept in its own CSV copy
+    (data/<ticker>_ohlcv.csv) so the Open/Close data used by the RRG is not touched. -> frame"""
+    path = os.path.join(DATA, ticker.replace("^", "") + "_ohlcv.csv")
+    fresh = os.path.exists(path) and \
+        datetime.fromtimestamp(os.path.getmtime(path)).date() == datetime.now().date()
+    if force or not fresh:
+        try:
+            import yfinance as yf
+            d = yf.download(ticker, period="max", interval="1d", auto_adjust=True, progress=False)
+            if isinstance(d.columns, pd.MultiIndex):
+                d.columns = d.columns.get_level_values(0)
+            d = d[["Open", "High", "Low", "Close", "Volume"]].apply(pd.to_numeric, errors="coerce").dropna()
+            d.index = pd.to_datetime(d.index).tz_localize(None).normalize()
+            d = d[(d[["Open", "High", "Low", "Close"]] > 0).all(axis=1)]
+            d = d[~d.index.duplicated(keep="last")].sort_index()
+            d.index.name = "Date"
+            if d.empty:
+                raise ValueError("no rows")
+            d.to_csv(path)
+            return d
+        except Exception:
+            if not os.path.exists(path):
+                raise
+    return pd.read_csv(path, parse_dates=["Date"], index_col="Date")
+
+
 MANUAL = os.path.join(DATA, "nse_csv")
 os.makedirs(MANUAL, exist_ok=True)
 
@@ -193,17 +222,26 @@ def quadrant(r, m):
     return "Improving" if m >= 100 else "Lagging"
 
 
-def daily_rrg(al):
-    """Daily RS-Ratio / RS-Momentum / quadrant. Empty frame if the history is too short."""
-    rs = al["Close"] / al["Bench"]
+def daily_rrg(al, sma=0):
+    """Daily RS-Ratio / RS-Momentum / quadrant. Empty frame if the history is too short.
+
+    sma=0  -> RS from the daily close (original method).
+    sma=N  -> RS from N-day simple moving averages of price: SMA_N(stock) / SMA_N(NIFTY).
+              Trades still use the real Open/Close; the RRG starts on the same date as sma=0."""
+    if sma and sma > 1:
+        rs = al["Close"].rolling(sma).mean() / al["Bench"].rolling(sma).mean()
+    else:
+        rs = al["Close"] / al["Bench"]
     sm = rs.rolling(RS_PRESMOOTH, min_periods=1).mean()
     rr = 100.0 * sm.ewm(span=RS_SHORT, adjust=False).mean() / sm.ewm(span=RS_LONG, adjust=False).mean()
     rm = 100.0 * rr.ewm(span=MOM_SHORT, adjust=False).mean() / rr.ewm(span=MOM_LONG, adjust=False).mean()
     df = pd.DataFrame({"RS_Ratio": rr, "RS_Momentum": rm, "Open": al["Open"], "Close": al["Close"]}).dropna()
-    warm = min(WARMUP_DAILY, len(df) // 3)
-    if len(df) < warm + 10:
+    warm = min(WARMUP_DAILY, len(al) // 3)
+    if len(al) < warm + 10:
         return pd.DataFrame(columns=["RS_Ratio", "RS_Momentum", "Open", "Close", "Quadrant"]), warm
-    df = df.iloc[warm:].copy()
+    df = df[df.index >= al.index[warm]].copy()      # same start date whatever the price basis
+    if len(df) < 10:
+        return pd.DataFrame(columns=["RS_Ratio", "RS_Momentum", "Open", "Close", "Quadrant"]), warm
     df["Quadrant"] = [quadrant(a, b) for a, b in zip(df["RS_Ratio"], df["RS_Momentum"])]
     return df, warm
 
@@ -213,9 +251,11 @@ def _fill(o, c):
     return (o + c) / 2.0 if o == o else c
 
 
-def run_strategy(rrg, stop_loss_pct=STOP_LOSS_PCT, cost_pct=COST_PCT):
+def run_strategy(rrg, stop_loss_pct=STOP_LOSS_PCT, cost_pct=COST_PCT, take_profit_pct=None):
     """-> (trades, pending buy signal, pending sell signal). Pending = signalled on the last
-    day, to be executed on the next trading day."""
+    day, to be executed on the next trading day.
+    take_profit_pct (optional): any day's close >= buy price + x% sells that day at that close
+    (profit booked); like a stop-loss, it buys again only after a down-and-up of the Daily RRG."""
     dates, q = rrg.index, rrg["Quadrant"].to_numpy()
     c, o = rrg["Close"].to_numpy(), rrg["Open"].to_numpy()
     trades, pos, armed, pending, pending_exit = [], None, True, None, None
@@ -237,6 +277,13 @@ def run_strategy(rrg, stop_loss_pct=STOP_LOSS_PCT, cost_pct=COST_PCT):
                                                % (stop_loss_pct, c[i], stop_px, q[i])))
                 pos = None
                 armed = q[i] in DOWN        # stopped in an up phase: wait for a down-and-up
+            elif take_profit_pct and c[i] >= pos["buy_px"] * (1 + take_profit_pct / 100.0):
+                trades.append(dict(pos, sell=d, sell_px=c[i], open=False, exit_signal=d, exit_into=q[i],
+                                   stop=False, take_profit=True, stop_px=stop_px,
+                                   exit_reason="Take-profit %g%%: close ₹%.2f ≥ ₹%.2f (Daily %s)"
+                                               % (take_profit_pct, c[i], pos["buy_px"] * (1 + take_profit_pct / 100.0), q[i])))
+                pos = None
+                armed = q[i] in DOWN
             elif q[i] in DOWN:
                 pending_exit = dict(exit_signal=d, exit_into=q[i], stop=False, stop_px=stop_px,
                                     exit_reason="Daily → %s" % q[i])
@@ -257,6 +304,101 @@ def run_strategy(rrg, stop_loss_pct=STOP_LOSS_PCT, cost_pct=COST_PCT):
         end = t["sell"] if t["sell"] is not None else dates[-1]
         t["held"] = int(dates.searchsorted(end, side="right") - dates.searchsorted(t["buy"], side="right"))
     return trades, pending, pending_exit
+
+
+def replay_realistic(rrg, px, tp_pct=10.0, sl_pct=10.0, cost_pct=COST_PCT, amount=100000.0, end=None):
+    """Replay the Daily RRG strategy with orders a trader could actually place, on daily OHLCV `px`.
+
+    Entry  : the day after the RRG turns Improving/Leading, market buy at that day's OPEN (whole shares).
+    Exits  : stop-loss order at buy - sl%  -> fills when the day's LOW reaches it (at the stop, or at the
+             open if the stock opens below it = gap-down);
+             take-profit limit at buy + tp% -> fills when the day's HIGH reaches it (at the target, or at
+             the open if it opens above it);
+             if one day's range contains BOTH levels the order is unknown from daily data, so the
+             stop-loss is assumed first (conservative);
+             RRG exit: the day after Weakening/Lagging, market sell at that day's OPEN.
+    Re-entry after a stop-loss / take-profit only after the Daily RRG goes down and comes back up.
+    Every trade carries `flags`: practical barriers seen on its entry / exit days."""
+    q = rrg["Quadrant"]
+    px = px[px.index.isin(rrg.index)]
+    days = list(px.index)
+    prev_close = px["Close"].shift(1)
+    k = cost_pct / 100.0
+    trades, pos, armed, want_buy, want_sell = [], None, True, None, None
+
+    def day_flags(d, side):
+        f = []
+        o, h, l, c, v = (px.at[d, x] for x in ("Open", "High", "Low", "Close", "Volume"))
+        pc = prev_close.get(d)
+        if h == l:
+            f.append("%s %s: price locked all day (High = Low) — likely circuit, order may not fill"
+                     % (side, d.strftime("%d %b %Y")))
+        elif pc == pc and pc and abs(c / pc - 1) >= 0.195:
+            f.append("%s %s: %+.1f%% day — near a 20%% circuit band, fills can be hard"
+                     % (side, d.strftime("%d %b %Y"), 100 * (c / pc - 1)))
+        value = v * c
+        if value > 0 and amount / value > 0.02:
+            f.append("%s %s: ₹%s = %.1f%% of the day's traded value (₹%.1f lakh) — thin liquidity, expect slippage"
+                     % (side, d.strftime("%d %b %Y"), format(amount, ",.0f"), 100 * amount / value, value / 1e5))
+        return f
+
+    for i, d in enumerate(days):
+        o, h, l, c = (px.at[d, x] for x in ("Open", "High", "Low", "Close"))
+        if want_sell is not None and pos is not None:               # RRG exit at today's open
+            pos.update(sell=d, sell_px=o, exit="Daily RRG → %s" % want_sell, flags=pos["flags"] + day_flags(d, "Sell"))
+            trades.append(pos); pos, want_sell, armed = None, None, True
+        elif want_buy is not None and pos is None:                  # entry at today's open
+            sh = int(amount // (o * (1 + k)))
+            if sh == 0:
+                want_buy = None
+            else:
+                pos = dict(signal=want_buy, buy=d, buy_px=o, shares=sh, flags=day_flags(d, "Buy"))
+                want_buy = None
+        if pos is not None and pos.get("sell") is None:
+            stop, target = pos["buy_px"] * (1 - sl_pct / 100.0), pos["buy_px"] * (1 + tp_pct / 100.0)
+            gap_open = d != pos["buy"]                              # on the entry day we bought at the open
+            hit = None
+            if gap_open and o <= stop:
+                hit = ("Stop-loss (gap-down open)", o, "stop")
+                pos["flags"].append("Sell %s: opened at ₹%.2f, below the stop ₹%.2f — loss bigger than %g%%"
+                                    % (d.strftime("%d %b %Y"), o, stop, sl_pct))
+            elif gap_open and o >= target:
+                hit = ("Take-profit (gap-up open)", o, "tp")
+            elif l <= stop and h >= target:
+                hit = ("Stop-loss (both levels in one day — assumed stop first)", stop, "stop")
+                pos["flags"].append("Sell %s: day's range touched BOTH stop ₹%.2f and target ₹%.2f — daily data can't "
+                                    "tell which came first; stop-loss assumed" % (d.strftime("%d %b %Y"), stop, target))
+            elif l <= stop:
+                hit = ("Stop-loss %g%%" % sl_pct, stop, "stop")
+            elif h >= target:
+                hit = ("Take-profit %g%%" % tp_pct, target, "tp")
+            if hit:
+                pos.update(sell=d, sell_px=hit[1], exit=hit[0], kind=hit[2], flags=pos["flags"] + day_flags(d, "Sell"))
+                trades.append(pos); pos = None
+                armed = q.get(d) in DOWN
+                continue
+            if q.get(d) in DOWN:
+                want_sell = q.get(d)
+            continue
+        if pos is None and want_buy is None:
+            if q.get(d) in DOWN:
+                armed = True
+            elif armed and q.get(d) in UP and i + 1 < len(days) and (end is None or days[i + 1] <= end):
+                want_buy = d
+    if pos is not None:
+        pos.update(sell=None, sell_px=float(px["Close"].iloc[-1]), exit="Open position (marked at last close)")
+        trades.append(pos)
+    for t in trades:
+        t.setdefault("kind", "rrg" if t["sell"] is not None else "open")
+        paid = t["shares"] * t["buy_px"] * (1 + k)
+        got = t["shares"] * t["sell_px"] * (1 - k)
+        t["ret"] = 100.0 * (got - paid) / paid
+        t["days"] = int(((t["sell"] if t["sell"] is not None else days[-1]) - t["buy"]).days)
+        if t["sell"] is not None and t["days"] == 0:
+            t["flags"].append("Bought and sold the same day (%s) — that is an intraday trade (different charges and tax "
+                              "from delivery); counted as 1 day held" % t["buy"].strftime("%d %b %Y"))
+            t["days"] = 1
+    return trades
 
 
 def summary(trades):

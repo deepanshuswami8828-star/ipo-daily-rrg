@@ -3,7 +3,7 @@
 # (Same method as the help folder's RRG Graph app\tools\share_link.ps1, port 8502.)
 $ErrorActionPreference = "Stop"
 $app  = Split-Path -Parent $PSScriptRoot
-$port = 8502
+$port = 8510
 $url  = "http://127.0.0.1:$port"
 $host.UI.RawUI.WindowTitle = "IPO Daily RRG - public link (keep open while sharing)"
 
