@@ -57,7 +57,7 @@ def profit_pct(t, cost):
 
 def tag_report(tag, sma, stop_loss, cost, token, since=None):
     rows, left_out = {}, {}
-    for s in core.stocks_for_tag(tag):
+    for s in members:
         status, first, trades = stock_trades(s, sma, stop_loss, token, since)
         if status:
             left_out[s] = status
@@ -91,6 +91,16 @@ cost = c5.number_input("Charges / side (%)", 0.0, 1.0, core.COST_PCT, 0.01, key=
 since = pd.Timestamp(c6.date_input("From", value=pd.Timestamp(FROM_DEFAULT).date(), key="tags_from"))
 basis_txt = "SMA %d price" % sma if sma else "daily close"
 tag_name = "All stocks" if tag == "All" else tag
+q = st.text_input("🔍 Search stock", key="tags_search", placeholder="name, ticker, sector, city or tag — leave empty for the whole tag",
+                  help="Every word must match, e.g. 'kaynes', 'jewel', 'technology'. Averages and charts below then use only "
+                       "the matching stocks.")
+members = an.search_stocks(core.stocks_for_tag(tag), q)
+if q and not members:
+    st.warning("No stock in %s matches “%s”." % (tag_name, q))
+    st.stop()
+if q:
+    st.caption("🔍 %d of %d stocks match “%s”: %s" % (len(members), len(core.stocks_for_tag(tag)), q, ", ".join(members)))
+    tag_name = "%s · search “%s”" % (tag_name, q)
 
 st.markdown("### Tag: %s · %s to %s" % (tag_name, since.strftime("%d %b %Y"), "now"))
 st.caption("Trades bought on or after **%s** (the RRG itself uses the whole history for its warm-up). "
@@ -153,7 +163,7 @@ st.markdown("### Static time view · %s · %s to now" % (tag_name, since.strftim
 st.caption("No slider — the whole period in one picture. Daily RRG built on **%s**. A stock listed after %s starts "
            "on its first RRG session." % (basis_txt, since.strftime("%d %b %Y")))
 views = {}
-for s in core.stocks_for_tag(tag):
+for s in members:
     status, al, rrg = stock_rrg(s, sma, token)
     if status:
         continue
@@ -273,7 +283,7 @@ fig.update_layout(barmode="group", height=360, margin=dict(l=10, r=10, t=30, b=1
 st.plotly_chart(fig, width="stretch", key="tags_cmp")
 
 cmp_rows = []
-for s in core.stocks_for_tag(tag):
+for s in members:
     row = {"Ticker": s, "Stock": INFO[s]["name"]}
     for b, n, sl in combos:
         rr = reps[(b, sl)]["rows"].get(s)

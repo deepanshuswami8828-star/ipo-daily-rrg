@@ -63,6 +63,21 @@ def sector(sym):
     return PROFILE.get(sym, ("—", "—", "—"))[0]
 
 
+def search_stocks(symbols, query):
+    """Stocks matching a search box: every word must appear in the ticker, name, sector, industry, city or tags
+    (case-insensitive). Empty query -> all symbols, in the same order."""
+    from rrg_core import INFO
+    words = str(query or "").lower().split()
+    if not words:
+        return list(symbols)
+
+    def text(s):
+        i = INFO[s]
+        return " ".join([s, i["name"], *PROFILE.get(s, ("", "", "")), *i["tags"]]).lower()
+
+    return [s for s in symbols if all(w in text(s) for w in words)]
+
+
 # ---- market clock -------------------------------------------------------------
 def now_ist():
     return datetime.now(IST)

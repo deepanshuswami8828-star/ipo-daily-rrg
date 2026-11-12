@@ -99,10 +99,19 @@ sma = int(c3.number_input("SMA days", 2, 200, core.SMA_DEFAULT, 1, key="vin_sma"
 stop_loss = c4.radio("Stop-loss", core.STOP_LOSS_OPTIONS, horizontal=True, key="vin_sl", format_func=lambda v: "%g%%" % v)
 cost = c5.number_input("Charges / side (%)", 0.0, 1.0, core.COST_PCT, 0.01, key="vin_cost")
 basis_txt = "SMA %d price" % sma if sma else "daily close"
+q = st.text_input("🔍 Search stock", key="vin_search", placeholder="name, ticker, sector, city or tag — leave empty for the whole tag",
+                  help="Every word must match, e.g. 'kaynes', 'jewel', 'technology'. Charts, averages and tables below "
+                       "then use only the matching stocks.")
+members = an.search_stocks(core.stocks_for_tag(tag), q)
+if q and not members:
+    st.warning("No stock matches “%s”." % q)
+    st.stop()
+if q:
+    st.caption("🔍 %d of %d stocks match “%s”: %s" % (len(members), len(core.stocks_for_tag(tag)), q, ", ".join(members)))
 
 curves, starts, trades_by, left_out = {}, {}, {}, {}
 with st.spinner("Building every stock's first 6 months..."):
-    for s in core.stocks_for_tag(tag):
+    for s in members:
         status, start, df, trs = vintage(s, sma, stop_loss, cost, token)
         if status:
             left_out[s] = status

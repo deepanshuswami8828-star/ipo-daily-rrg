@@ -405,7 +405,15 @@ with st.sidebar:
     st.header("Stock & View Selection")
     all_syms = [s for s, _ in STOCKS]
     labels = {s: "%d. %s (%s)" % (i + 1, INFO[s]["name"], an.sector(s)) for i, s in enumerate(all_syms)}
-    sym = st.selectbox("Select Stock", all_syms, format_func=labels.get, key="stock")
+    query = st.text_input("🔍 Search stock", key="search", placeholder="name, ticker, sector, city or tag",
+                          help="Every word must match — e.g. 'kaynes', 'jewel', 'robotics', 'technology pune'.")
+    found = an.search_stocks(all_syms, query)
+    if query and not found:
+        st.warning("No stock matches “%s” — showing all %d." % (query, len(all_syms)))
+        found = all_syms
+    elif query:
+        st.caption("%d of %d stocks match" % (len(found), len(all_syms)))
+    sym = st.selectbox("Select Stock", found, format_func=labels.get, key="stock")
     st.caption("**Selected:** %s · Sector: *%s* · Tags: %s" % (INFO[sym]["name"], an.sector(sym), ", ".join(INFO[sym]["tags"])))
     page = st.radio("Page", ["Daily RRG", "Strategy", "All stocks", "Rules"], key="page")
     st.divider()
@@ -697,12 +705,16 @@ elif page == "Strategy":
 # ================================================================ ALL STOCKS PAGE
 elif page == "All stocks":
     st.markdown("#### All Stocks Comparison (Daily RRG on %s) against %s" % (BASIS, BENCH))
-    c1, c2 = st.columns(2)
+    c1, c2, c3 = st.columns([1, 1.4, 1.2])
     tag = c1.selectbox("Show tag", ["All"] + core.TAGS, format_func=lambda t: "%s (%d)" % (t, len(core.stocks_for_tag(t))))
     tag_syms = core.stocks_for_tag(tag)
     sectors = sorted({an.sector(s) for s in tag_syms})
     pick = c2.multiselect("Filter by sector", sectors, default=sectors)
-    syms = [s for s in tag_syms if an.sector(s) in pick]
+    q_all = c3.text_input("🔍 Search", key="search_all", placeholder="name, ticker, sector, tag")
+    syms = an.search_stocks([s for s in tag_syms if an.sector(s) in pick], q_all)
+    if q_all and not syms:
+        st.warning("No stock matches “%s”." % q_all)
+        st.stop()
     rows = []
     for s in syms:
         g = safe_load(s, token, sma)
