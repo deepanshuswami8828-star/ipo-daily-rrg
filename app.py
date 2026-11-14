@@ -1,5 +1,5 @@
 """
-IPO Daily RRG app - 50 Indian IPOs (Top 20 of 2026, Robotics & Automation, 24 random mainboard IPOs) against NIFTY 50, each from its listing day.
+IPO Daily RRG app - 76 Indian IPOs (Top 20 of 2026, Robotics & Automation, 50 random mainboard IPOs) against NIFTY 50, each from its listing day.
 
 Pages (Daily RRG only):
   Daily RRG   - RRG with a date slider for the tail, quadrant timeline, date lookup, quadrant periods,

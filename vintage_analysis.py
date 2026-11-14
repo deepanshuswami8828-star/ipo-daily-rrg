@@ -496,6 +496,12 @@ def replay(symbol, sma, tp, sl, cost, amount, only6, token):
     return core.replay_realistic(rrg_s, px, tp, sl, cost, amount), ""
 
 
+if not st.toggle("▶ Run the realistic replay", value=False, key="rp_run",
+                 help="Downloads daily Open/High/Low/Close/Volume for every stock shown (about a minute the first "
+                      "time each day for the whole list; search for one stock to make it quick)."):
+    st.info("Switch on **Run the realistic replay** to replay the %d stocks shown above with real orders and see the "
+            "practical barriers on every trade. Tip: search for one stock first to make it quick." % len(curves))
+    st.stop()
 with st.spinner("Replaying every stock with real orders..."):
     rp = {s: replay(s, sma, rtp, rsl, cost, ramt, r6m, token) for s in curves}
 rows, all_flags = [], {}

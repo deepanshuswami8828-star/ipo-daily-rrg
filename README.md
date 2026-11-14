@@ -1,10 +1,10 @@
 # IPO Daily RRG
 
-Daily Relative Rotation Graph (RRG) of 50 Indian IPOs against NIFTY 50, each from its listing day:
+Daily Relative Rotation Graph (RRG) of 76 Indian IPOs against NIFTY 50, each from its listing day:
 
 - **Top 20 IPO 2026** - the 20 best-performing 2026 NSE mainboard IPOs
 - **Robotics and Automation** - 6 stocks (2 of them NSE SME, which need NSE CSV files)
-- **24 more mainboard IPOs** listed Nov 2024 - Nov 2025, picked at random (in the "All" tag only)
+- **50 more mainboard IPOs** listed Nov 2024 - Dec 2025, picked at random (in the "All" tag only)
 
 With a date slider for the tail, quadrant history, up/down cycles, a data validation panel, and a Daily-RRG
 strategy (buy in Leading/Improving, sell in Weakening/Lagging, 10% or 15% stop-loss) simulated in rupees.

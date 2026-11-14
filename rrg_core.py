@@ -120,7 +120,41 @@ MORE24 = [
     ("PWL", "PhysicsWallah", "2025-11-18", 109, 3480.00),
 ]
 
-STOCKS = [(s, n) for s, n, *_ in TOP20] + [(s, n) for s, n, *_ in ROBOTICS] + [(s, n) for s, n, *_ in MORE24]
+# ---- 26 more, so there are 50 new mainboard IPOs in all (added 14 Nov 2026) -----------------
+# The 28 left in the same pool after MORE24; random.seed(2026); random.sample(rest, 26).
+# Left out by the draw: TRANSRAILL, ATHERENERG. Verified the same way as MORE24. BlackBuck and
+# Dr Agarwal's have two listing dates in the sources; the first trading day in the data is used.
+MORE26 = [
+    ("BLACKBUCK", "Zinka Logistics Solutions (BlackBuck)", "2024-11-22", 273, 1114.72),
+    ("EIEL", "Enviro Infra Engineers", "2024-11-29", 148, 650.43),
+    ("VMM", "Vishal Mega Mart", "2024-12-18", 78, 8000.00),
+    ("IGIL", "International Gemmological Institute (India)", "2024-12-20", 417, 4225.00),
+    ("CEWATER", "Concord Enviro Systems", "2024-12-27", 701, 500.33),
+    ("VENTIVE", "Ventive Hospitality", "2024-12-30", 643, 1600.00),
+    ("SENORES", "Senores Pharmaceuticals", "2024-12-30", 391, 582.11),
+    ("CARRARO", "Carraro India", "2024-12-30", 704, 1250.00),
+    ("UNIMECH", "Unimech Aerospace and Manufacturing", "2024-12-31", 785, 500.00),
+    ("LAXMIDENTL", "Laxmi Dental", "2025-01-20", 428, 698.06),
+    ("AGARWALEYE", "Dr. Agarwal's Health Care", "2025-02-04", 402, 3027.26),
+    ("BELRISE", "Belrise Industries", "2025-05-28", 90, 2150.00),
+    ("AEGISVOPAK", "Aegis Vopak Terminals", "2025-06-02", 235, 2800.00),
+    ("THELEELA", "Schloss Bangalore (The Leela)", "2025-06-02", 435, 3500.00),
+    ("PROSTARM", "Prostarm Info Systems", "2025-06-03", 105, 168.00),
+    ("OSWALPUMPS", "Oswal Pumps", "2025-06-20", 614, 1387.34),
+    ("KALPATARU", "Kalpataru", "2025-07-01", 414, 1590.00),
+    ("ELLEN", "Ellenbarrie Industrial Gases", "2025-07-01", 400, 852.53),
+    ("TRAVELFOOD", "Travel Food Services", "2025-07-14", 1100, 2000.00),
+    ("SMARTWORKS", "Smartworks Coworking Spaces", "2025-07-17", 407, 582.56),
+    ("URBANCO", "Urban Company", "2025-09-17", 103, 1900.00),
+    ("WEWORK", "WeWork India Management", "2025-10-10", 648, 3000.00),
+    ("ORKLAINDIA", "Orkla India", "2025-11-06", 730, 1667.54),
+    ("LENSKART", "Lenskart Solutions", "2025-11-10", 402, 7278.00),
+    ("PINELABS", "Pine Labs", "2025-11-14", 221, 3899.91),
+    ("MEESHO", "Meesho", "2025-12-10", 111, 5421.20),
+]
+NEW50 = MORE24 + MORE26
+
+STOCKS = [(s, n) for s, n, *_ in TOP20] + [(s, n) for s, n, *_ in ROBOTICS] + [(s, n) for s, n, *_ in NEW50]
 INFO = {}
 for s, n, l, i, z in TOP20:
     INFO[s] = dict(symbol=s, name=n, listed=pd.Timestamp(l), issue=float(i), size=z,
@@ -128,7 +162,7 @@ for s, n, l, i, z in TOP20:
 for s, n, l, i, z, t, src in ROBOTICS:
     INFO[s] = dict(symbol=s, name=n, listed=pd.Timestamp(l), issue=float(i) if i else None, size=z,
                    ticker=t, source=src, tags=[TAG_ROBOTICS])
-for s, n, l, i, z in MORE24:
+for s, n, l, i, z in NEW50:
     INFO[s] = dict(symbol=s, name=n, listed=pd.Timestamp(l), issue=float(i), size=z,
                    ticker=s + ".NS", source="yahoo", tags=[])
 
