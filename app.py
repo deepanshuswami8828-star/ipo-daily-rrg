@@ -1,12 +1,12 @@
 """
-2026 IPO Daily RRG app - the 20 best 2026 mainboard IPOs against NIFTY 50, each from its listing day.
+IPO Daily RRG app - 50 Indian IPOs (Top 20 of 2026, Robotics & Automation, 24 random mainboard IPOs) against NIFTY 50, each from its listing day.
 
 Pages (Daily RRG only):
   Daily RRG   - RRG with a date slider for the tail, quadrant timeline, date lookup, quadrant periods,
                 up/down cycles and every session
   Strategy    - Strategy 2 Version 3 rules on the Daily RRG (10% stop-loss) in rupees: profit/loss,
                 why it happened, current BUY / HOLD / SELL / WAIT status, every trade
-  All stocks  - all 20 side by side (filter by sector) and a multi-stock RRG with a date slider
+  All stocks  - every stock side by side (filter by sector) and a multi-stock RRG with a date slider
   Rules       - formula and strategy rules
 A Data Status & Validation panel sits at the top of every page.
 
@@ -347,7 +347,7 @@ def strategy_figure(al, rrg, book, value, bh_value, issue):
 def coverage(token):
     rows = []
     for s, name, *_ in STOCKS:
-        tags = ", ".join(INFO[s]["tags"])
+        tags = core.tag_text(s)
         got = safe_load(s, token)
         if got is None:
             rows.append({"Stock": name, "Symbol": s, "Tags": tags, "Sector": an.sector(s),
@@ -371,7 +371,7 @@ def data_panel(sym, al, note, fetched, token):
     with st.expander("📊 Data Status & Validation Panel", expanded=False):
         c1, c2, c3, c4 = st.columns(4)
         c1.markdown("**Selected stock:** %s" % INFO[sym]["name"])
-        c1.caption("Ticker: `%s` · Tags: %s · Benchmark: `%s`" % (INFO[sym]["ticker"], ", ".join(INFO[sym]["tags"]), BENCH))
+        c1.caption("Ticker: `%s` · Tags: %s · Benchmark: `%s`" % (INFO[sym]["ticker"], core.tag_text(sym), BENCH))
         c2.markdown("**Last sync:** %s IST" % fetched.strftime("%d %b %Y %H:%M"))
         c2.caption("Provider: %s" % note)
         status = "LIVE" if v["last"] >= exp else "STALE"
@@ -414,7 +414,7 @@ with st.sidebar:
     elif query:
         st.caption("%d of %d stocks match" % (len(found), len(all_syms)))
     sym = st.selectbox("Select Stock", found, format_func=labels.get, key="stock")
-    st.caption("**Selected:** %s · Sector: *%s* · Tags: %s" % (INFO[sym]["name"], an.sector(sym), ", ".join(INFO[sym]["tags"])))
+    st.caption("**Selected:** %s · Sector: *%s* · Tags: %s" % (INFO[sym]["name"], an.sector(sym), core.tag_text(sym)))
     page = st.radio("Page", ["Daily RRG", "Strategy", "All stocks", "Rules"], key="page")
     st.divider()
     tail_n = st.slider("Tail length (sessions)", 3, 40, 10)
@@ -486,7 +486,7 @@ def stock_header(title):
     now = an.now_ist()
     st.markdown("#### %s (%s) against %s — %s" % (info["name"], sym, BENCH, title))
     st.caption("%s · %s · %s, %s · tags: %s · listed %s · %s · %d sessions · first %d used as EMA warm-up · %s"
-               % ("🟢 NSE open" if an.market_open(now) else "⚪ NSE closed", sec, ind, city, ", ".join(info["tags"]),
+               % ("🟢 NSE open" if an.market_open(now) else "⚪ NSE closed", sec, ind, city, core.tag_text(sym),
                   info["listed"].strftime("%d %b %Y"), issue_text(info), len(al), warm, note))
     if sym in an.NOTES:
         st.caption("ℹ️ " + an.NOTES[sym])
@@ -719,7 +719,7 @@ elif page == "All stocks":
     for s in syms:
         g = safe_load(s, token, sma)
         name = INFO[s]["name"]
-        base = {"Stock": name, "Symbol": s, "Tags": ", ".join(INFO[s]["tags"]), "Sector": an.sector(s),
+        base = {"Stock": name, "Symbol": s, "Tags": core.tag_text(s), "Sector": an.sector(s),
                 "Listed": INFO[s]["listed"].strftime("%d %b %Y")}
         if g is None:
             rows.append(dict(base, Note="NSE SME stock — add NSE CSV files" if INFO[s]["source"] == "nse_csv"

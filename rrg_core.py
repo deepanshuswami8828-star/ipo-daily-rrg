@@ -87,7 +87,40 @@ ROBOTICS = [
     ("BONFIG", "Bonfiglioli Transmissions", "2026-10-23", 586, 2533.67, "BONFIG.NS", "yahoo"),
 ]
 
-STOCKS = [(s, n) for s, n, *_ in TOP20] + [(s, n) for s, n, *_ in ROBOTICS]
+# ---- 24 more mainboard IPOs, picked at random (added 14 Nov 2026) ------------------------
+# Pool: 52 NSE mainboard IPOs listed 15 Nov 2024 - 14 Nov 2026 that have Yahoo price history;
+# random.seed(2026); random.sample(pool, 24). No extra tag: they appear under "All".
+# Issue price (upper band) and size verified 14 Nov 2026 from broker / news IPO pages;
+# every listing date matches the first trading day in the Yahoo data.
+# symbol, name, listing date, issue price, issue size (Rs cr)
+MORE24 = [
+    ("NTPCGREEN", "NTPC Green Energy", "2024-11-27", 108, 10000.00),
+    ("SURAKSHA", "Suraksha Diagnostic", "2024-12-06", 441, 846.25),
+    ("SAILIFE", "Sai Life Sciences", "2024-12-18", 549, 3042.62),
+    ("MOBIKWIK", "One Mobikwik Systems", "2024-12-18", 279, 572.00),
+    ("IKS", "Inventurus Knowledge Solutions", "2024-12-19", 1329, 2497.92),
+    ("DAMCAPITAL", "DAM Capital Advisors", "2024-12-27", 283, 840.25),
+    ("MAMATA", "Mamata Machinery", "2024-12-27", 243, 179.39),
+    ("STALLION", "Stallion India Fluorochemicals", "2025-01-23", 90, 199.45),
+    ("HEXT", "Hexaware Technologies", "2025-02-19", 708, 8750.00),
+    ("SCODATUBES", "Scoda Tubes", "2025-06-04", 140, 220.00),
+    ("HDBFS", "HDB Financial Services", "2025-07-02", 740, 12500.00),
+    ("SAMBHV", "Sambhv Steel Tubes", "2025-07-02", 82, 540.00),
+    ("CRIZAC", "Crizac", "2025-07-09", 245, 860.00),
+    ("ANTHEM", "Anthem Biosciences", "2025-07-21", 570, 3395.00),
+    ("BRIGHOTEL", "Brigade Hotel Ventures", "2025-07-31", 90, 759.60),
+    ("CPPLUS", "Aditya Infotech (CP Plus)", "2025-08-05", 675, 1300.00),
+    ("JSWCEMENT", "JSW Cement", "2025-08-14", 147, 3600.00),
+    ("VIKRAMSOLR", "Vikram Solar", "2025-08-26", 332, 2079.37),
+    ("TATACAP", "Tata Capital", "2025-10-13", 326, 15511.87),
+    ("LGEINDIA", "LG Electronics India", "2025-10-14", 1140, 11607.01),
+    ("CRAMC", "Canara Robeco Asset Management", "2025-10-16", 266, 1326.13),
+    ("STUDDS", "Studds Accessories", "2025-11-07", 585, 455.49),
+    ("GROWW", "Billionbrains Garage Ventures (Groww)", "2025-11-12", 100, 6632.30),
+    ("PWL", "PhysicsWallah", "2025-11-18", 109, 3480.00),
+]
+
+STOCKS = [(s, n) for s, n, *_ in TOP20] + [(s, n) for s, n, *_ in ROBOTICS] + [(s, n) for s, n, *_ in MORE24]
 INFO = {}
 for s, n, l, i, z in TOP20:
     INFO[s] = dict(symbol=s, name=n, listed=pd.Timestamp(l), issue=float(i), size=z,
@@ -95,11 +128,19 @@ for s, n, l, i, z in TOP20:
 for s, n, l, i, z, t, src in ROBOTICS:
     INFO[s] = dict(symbol=s, name=n, listed=pd.Timestamp(l), issue=float(i) if i else None, size=z,
                    ticker=t, source=src, tags=[TAG_ROBOTICS])
+for s, n, l, i, z in MORE24:
+    INFO[s] = dict(symbol=s, name=n, listed=pd.Timestamp(l), issue=float(i), size=z,
+                   ticker=s + ".NS", source="yahoo", tags=[])
 
 
 def stocks_for_tag(tag):
     """Symbols carrying `tag` (None or "All" = every stock), in list order."""
     return [s for s, _ in STOCKS if tag in (None, "All") or tag in INFO[s]["tags"]]
+
+
+def tag_text(symbol):
+    """Tags of a stock for display; a stock with no tag of its own is only in "All"."""
+    return ", ".join(INFO[symbol]["tags"]) or "All only"
 
 
 # ---- data ---------------------------------------------------------------------

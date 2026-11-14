@@ -1,5 +1,5 @@
 """
-analysis.py - the per-stock details the help-folder app shows, rebuilt for the 20 IPOs (Daily only):
+analysis.py - the per-stock details the help-folder app shows, rebuilt for the IPOs in this app (Daily only):
 stock profile, data validation, quadrant periods, up/down cycles, rupee simulation of the strategy,
 metrics, and a plain "why profit / loss" explanation (English + Hinglish).
 """
@@ -42,6 +42,31 @@ PROFILE = {
     "PATILAUTOM": ("Industrials", "Industrial automation", "Pune"),
     "AFFORDABLE": ("Industrials", "Robotics & automation machinery", "Pune"),
     "BONFIG": ("Industrials", "Gearboxes & drives (Specialty Machinery)", "Kanchipuram"),
+    # 24 more mainboard IPOs (random pick, Nov 2024 - Nov 2025 listings)
+    "NTPCGREEN": ("Utilities", "Renewable power (NTPC subsidiary)", "New Delhi"),
+    "SURAKSHA": ("Healthcare", "Diagnostic centres", "Kolkata"),
+    "SAILIFE": ("Healthcare", "Contract research & manufacturing (CRDMO)", "Hyderabad"),
+    "MOBIKWIK": ("Technology", "Fintech - payments & wallet", "Gurugram"),
+    "IKS": ("Healthcare", "Healthcare technology & services", "Mumbai"),
+    "DAMCAPITAL": ("Financial Services", "Investment banking", "Mumbai"),
+    "MAMATA": ("Industrials", "Packaging machinery", "Ahmedabad"),
+    "STALLION": ("Basic Materials", "Refrigerant & industrial gases", "Mumbai"),
+    "HEXT": ("Technology", "IT services", "Navi Mumbai"),
+    "SCODATUBES": ("Basic Materials", "Stainless steel pipes & tubes", "Mehsana"),
+    "HDBFS": ("Financial Services", "NBFC (HDFC Bank subsidiary)", "Ahmedabad"),
+    "SAMBHV": ("Basic Materials", "Steel pipes & tubes", "Raipur"),
+    "CRIZAC": ("Consumer Defensive", "International student recruitment", "Kolkata"),
+    "ANTHEM": ("Healthcare", "Contract research & manufacturing (CRDMO)", "Bengaluru"),
+    "BRIGHOTEL": ("Consumer Cyclical", "Hotels", "Bengaluru"),
+    "CPPLUS": ("Technology", "Security & surveillance products (CP Plus)", "Noida"),
+    "JSWCEMENT": ("Basic Materials", "Cement", "Mumbai"),
+    "VIKRAMSOLR": ("Technology", "Solar modules", "Kolkata"),
+    "TATACAP": ("Financial Services", "NBFC (Tata group)", "Mumbai"),
+    "LGEINDIA": ("Technology", "Consumer electronics & home appliances", "Noida"),
+    "CRAMC": ("Financial Services", "Asset management", "Mumbai"),
+    "STUDDS": ("Consumer Cyclical", "Two-wheeler helmets & accessories", "Faridabad"),
+    "GROWW": ("Financial Services", "Online broking & investing", "Bengaluru"),
+    "PWL": ("Consumer Defensive", "Ed-tech", "Noida"),
 }
 NOTES = {
     "RAMBHAJO": "Advit Jewels trades on NSE as RAMBHAJO (data starts on its 1 Jul 2026 listing day).",
