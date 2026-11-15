@@ -117,6 +117,49 @@ def sector(sym):
     return PROFILE.get(sym, ("—", "—", "—"))[0]
 
 
+SECTOR_PREFIX = "sector:"
+
+
+def sector_groups():
+    """[(sector, number of stocks)] for every sector in the app, largest first."""
+    from rrg_core import STOCKS
+    counts = {}
+    for s, _ in STOCKS:
+        counts[sector(s)] = counts.get(sector(s), 0) + 1
+    return sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+
+
+def group_options():
+    """Choices for a 'Tag' dropdown: All, the tags, then one entry per sector (e.g. 'sector:Industrials')."""
+    from rrg_core import TAGS
+    return ["All"] + list(TAGS) + [SECTOR_PREFIX + sec for sec, _ in sector_groups()]
+
+
+def stocks_for_group(group):
+    """Symbols in a dropdown choice: "All", a tag, or "sector:<name>"."""
+    from rrg_core import STOCKS, stocks_for_tag
+    if str(group).startswith(SECTOR_PREFIX):
+        sec = group[len(SECTOR_PREFIX):]
+        return [s for s, _ in STOCKS if sector(s) == sec]
+    return stocks_for_tag(group)
+
+
+def group_name(group):
+    """Display name: 'All stocks', the tag, or the sector name."""
+    if group == "All":
+        return "All stocks"
+    return group[len(SECTOR_PREFIX):] if str(group).startswith(SECTOR_PREFIX) else group
+
+
+def group_label(group):
+    """Dropdown label with the number of stocks, e.g. 'Industrials (17 stocks)' or 'Sector · Industrials (17)'."""
+    n = len(stocks_for_group(group))
+    count = "%d stock%s" % (n, "" if n == 1 else "s")
+    if str(group).startswith(SECTOR_PREFIX):
+        return "Sector · %s (%s)" % (group_name(group), count)
+    return "%s (%s)" % (group_name(group), count)
+
+
 def search_stocks(symbols, query):
     """Stocks matching a search box: every word must appear in the ticker, name, sector, industry, city or tags
     (case-insensitive). Empty query -> all symbols, in the same order."""

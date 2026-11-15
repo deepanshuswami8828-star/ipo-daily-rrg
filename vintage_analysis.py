@@ -50,8 +50,7 @@ st.caption(("⚡ Using results saved on %s (data up to %s) — settings other th
            "*Refresh data now* on the RRG charts page to save them.")
 
 c1, c2, c3, c4, c5 = st.columns([2.2, 1.6, 0.9, 1.2, 1])
-tag = c1.selectbox("Tag", ["All"] + core.TAGS, key="vin_tag",
-                   format_func=lambda g: "%s (%d stocks)" % ("All stocks" if g == "All" else g, len(core.stocks_for_tag(g))))
+tag = c1.selectbox("Tag or sector", an.group_options(), key="vin_tag", format_func=an.group_label)
 basis = c2.radio("RRG built on", ["Daily close", "SMA price"], horizontal=True, key="vin_basis")
 sma = int(c3.number_input("SMA days", 2, 200, core.SMA_DEFAULT, 1, key="vin_sma")) if basis == "SMA price" else 0
 stop_loss = c4.radio("Stop-loss", core.STOP_LOSS_OPTIONS, horizontal=True, key="vin_sl", format_func=lambda v: "%g%%" % v)
@@ -60,12 +59,12 @@ basis_txt = "SMA %d price" % sma if sma else "daily close"
 q = st.text_input("🔍 Search stock", key="vin_search", placeholder="name, ticker, sector, city or tag — leave empty for the whole tag",
                   help="Every word must match, e.g. 'kaynes', 'jewel', 'technology'. Charts, averages and tables below "
                        "then use only the matching stocks.")
-members = an.search_stocks(core.stocks_for_tag(tag), q)
+members = an.search_stocks(an.stocks_for_group(tag), q)
 if q and not members:
     st.warning("No stock matches “%s”." % q)
     st.stop()
 if q:
-    st.caption("🔍 %d of %d stocks match “%s”: %s" % (len(members), len(core.stocks_for_tag(tag)), q, ", ".join(members)))
+    st.caption("🔍 %d of %d stocks match “%s”: %s" % (len(members), len(an.stocks_for_group(tag)), q, ", ".join(members)))
 
 curves, starts, trades_by, left_out = {}, {}, {}, {}
 with st.spinner("Building every stock's first 6 months..."):
@@ -163,7 +162,7 @@ for m in range(1, AXIS_MONTHS + 1):
     fig.add_vline(x=m, line_color="#ddd", line_width=1)
 fig.update_layout(height=600, margin=dict(l=10, r=10, t=40, b=10),
                   title=dict(text="%s · Daily RRG on %s · %g%% stop-loss · %d stocks"
-                             % ("All stocks" if tag == "All" else tag, basis_txt, stop_loss, len(curves)), font=dict(size=15)),
+                             % (an.group_name(tag), basis_txt, stop_loss, len(curves)), font=dict(size=15)),
                   xaxis=dict(title="Months since the RRG chart started (month 0)", range=[0, AXIS_MONTHS], dtick=1),
                   yaxis=dict(title="Cumulative profit %", ticksuffix="%"), hovermode="closest",
                   plot_bgcolor="#fcfcfb", paper_bgcolor="#fcfcfb", legend=dict(font=dict(size=10)))
@@ -225,7 +224,7 @@ if vals_all:                                    # early days are noisy (a 1-day 
     yr = [min(lo, 0) - pad, max(hi, 0) + pad]
 dfig.update_layout(height=560, margin=dict(l=10, r=10, t=40, b=10), hovermode="closest",
                    title=dict(text="%s · Daily RRG on %s · %g%% stop-loss · %d stocks — average daily profit %%"
-                              % ("All stocks" if tag == "All" else tag, basis_txt, stop_loss, len(curves)), font=dict(size=15)),
+                              % (an.group_name(tag), basis_txt, stop_loss, len(curves)), font=dict(size=15)),
                    xaxis=dict(title="Months since the RRG chart started (month 0)", range=[0, AXIS_MONTHS], dtick=1),
                    yaxis=dict(title="Average daily profit % (per day held)", ticksuffix="%", range=yr),
                    legend=dict(font=dict(size=11)), plot_bgcolor="#fcfcfb", paper_bgcolor="#fcfcfb")
@@ -379,7 +378,7 @@ pad = (hi - lo) * 0.06 or 1
 lf.update_layout(height=650, margin=dict(l=70, r=20, t=60, b=10), hovermode="closest",
                  title=dict(text="%s · %d stocks · first 6 months  —  at every exit point: <span style='color:%s'>"
                                  "<b>10%% stop-loss on the left</b></span>, <span style='color:%s'><b>15%% stop-loss on the "
-                                 "right</b></span>" % ("All stocks" if tag == "All" else tag, len(curves),
+                                 "right</b></span>" % (an.group_name(tag), len(curves),
                                                        SL_COL[10.0], SL_COL[15.0]), font=dict(size=14)),
                  xaxis=dict(title="Profit exit point — take-profit (%)", range=[2, TAKE_PROFITS[-1] + 3],
                             tickvals=TAKE_PROFITS, ticktext=["<b>%d%%</b>" % x for x in TAKE_PROFITS], showgrid=False),
@@ -428,7 +427,7 @@ for k, sl in enumerate(core.STOP_LOSS_OPTIONS):        # lane titles on the left
                  line=dict(color=SL_COL.get(sl, "#555"), width=2.5), fillcolor="rgba(0,0,0,0)", layer="above")
 hm.update_layout(height=140 + 24 * n_rows, margin=dict(l=170, r=10, t=110, b=10),
                  title=dict(text="%s · %d stocks · Daily RRG on %s · first 6 months  —  top: %g%% stop-loss · bottom: "
-                                 "%g%% stop-loss" % ("All stocks" if tag == "All" else tag, len(curves), basis_txt,
+                                 "%g%% stop-loss" % (an.group_name(tag), len(curves), basis_txt,
                                                      core.STOP_LOSS_OPTIONS[0], core.STOP_LOSS_OPTIONS[-1]),
                             font=dict(size=14), y=0.995, yanchor="top"),
                  xaxis=dict(side="top", tickfont=dict(size=13)),

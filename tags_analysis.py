@@ -79,8 +79,7 @@ st.caption("Profitability of Strategy 2 · Version 3 rules on the **Daily** RRG 
 token = st.session_state.get("token", 0)
 
 c1, c2, c3, c4, c5, c6 = st.columns([2.2, 1.6, 0.9, 1.2, 1, 1.2])
-tag = c1.selectbox("Tag", ["All"] + core.TAGS, key="tags_page_tag",
-                   format_func=lambda g: "%s (%d stocks)" % (g, len(core.stocks_for_tag(g))))
+tag = c1.selectbox("Tag or sector", an.group_options(), key="tags_page_tag", format_func=an.group_label)
 basis = c2.radio("RRG built on", ["Daily close", "SMA price"], horizontal=True, key="tags_basis")
 sma = int(c3.number_input("SMA days", 2, 200, core.SMA_DEFAULT, 1, key="tags_sma",
                           disabled=basis != "SMA price")) if basis == "SMA price" else 0
@@ -89,19 +88,19 @@ stop_loss = c4.radio("Stop-loss", core.STOP_LOSS_OPTIONS, horizontal=True, key="
 cost = c5.number_input("Charges / side (%)", 0.0, 1.0, core.COST_PCT, 0.01, key="tags_cost")
 since = pd.Timestamp(c6.date_input("From", value=pd.Timestamp(FROM_DEFAULT).date(), key="tags_from"))
 basis_txt = "SMA %d price" % sma if sma else "daily close"
-tag_name = "All stocks" if tag == "All" else tag
+tag_name = an.group_name(tag)
 q = st.text_input("🔍 Search stock", key="tags_search", placeholder="name, ticker, sector, city or tag — leave empty for the whole tag",
                   help="Every word must match, e.g. 'kaynes', 'jewel', 'technology'. Averages and charts below then use only "
                        "the matching stocks.")
-members = an.search_stocks(core.stocks_for_tag(tag), q)
+members = an.search_stocks(an.stocks_for_group(tag), q)
 if q and not members:
     st.warning("No stock in %s matches “%s”." % (tag_name, q))
     st.stop()
 if q:
-    st.caption("🔍 %d of %d stocks match “%s”: %s" % (len(members), len(core.stocks_for_tag(tag)), q, ", ".join(members)))
+    st.caption("🔍 %d of %d stocks match “%s”: %s" % (len(members), len(an.stocks_for_group(tag)), q, ", ".join(members)))
     tag_name = "%s · search “%s”" % (tag_name, q)
 
-st.markdown("### Tag: %s · %s to %s" % (tag_name, since.strftime("%d %b %Y"), "now"))
+st.markdown("### %s: %s · %s to %s" % ("Sector" if str(tag).startswith(an.SECTOR_PREFIX) else "Tag", tag_name, since.strftime("%d %b %Y"), "now"))
 st.caption("Trades bought on or after **%s** (the RRG itself uses the whole history for its warm-up). "
            % since.strftime("%d %b %Y") +
            "Daily RRG built on **%s**, **%g%%** stop-loss. Buy the day after the Daily RRG turns Improving/Leading, "
