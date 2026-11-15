@@ -112,20 +112,23 @@ def exit_curves(tp):
     out = {}
     for s in curves:
         if tp is None:
-            out[s] = curves[s][["day", "strategy", "daily"]]
+            out[s] = curves[s][["day", "strategy", "daily", "held", "ntr"]]
             continue
         got = RES.get(("curve", s, sma, stop_loss, tp), "missing") if saved_ok(sma, cost) else "missing"
         if got == "missing":
             got = cp.curve_series(vintage(s, sma, stop_loss, cost, token, tp))
         if got is not None:
             out[s] = pd.DataFrame({"day": got[0].astype(int), "strategy": got[1].astype(float),
-                                   "daily": got[2].astype(float)})
+                                   "daily": got[2].astype(float), "held": got[3].astype(float),
+                                   "ntr": got[4].astype(float)})
     return out
 
 
 @st.cache_data(show_spinner=False, max_entries=64)
 def exit_lines(members_key, sma, stop_loss, cost, token, tp, col):
     """Average line of `col` over the stocks shown, at one exit point (cached per setting)."""
+    if col == "held":                                        # average calendar days held per closed trade
+        return cp.pooled_line(exit_curves(tp), "held", "ntr")
     return average_line(exit_curves(tp), col)
 
 
@@ -138,18 +141,33 @@ show_daily = o3.toggle("Show average daily profit % line", value=False, key="vin
 with st.spinner("Building the profit lines..."):
     plines = {tp: (avg if tp is None else exit_lines(mkey, sma, stop_loss, cost, token, tp, "strategy"))
               for tp in main_exits}
+    hlines = {tp: exit_lines(mkey, sma, stop_loss, cost, token, tp, "held") for tp in cp.EXITS}
+    dlines_all = {tp: (avg_daily if tp is None else exit_lines(mkey, sma, stop_loss, cost, token, tp, "daily"))
+                  for tp in cp.EXITS}
+
+
+def tip_data(tp):
+    """Per grid day: [stocks, avg days held per trade, avg daily profit %, avg cumulative profit %, closed trades]."""
+    return np.column_stack([plines[tp]["n"], hlines[tp]["avg"].round(1), dlines_all[tp]["avg"],
+                            plines[tp]["avg"], hlines[tp]["n"]])
+
+
+TIP_EXTRA = ("<br>avg days held per trade %{customdata[1]:.1f} (%{customdata[4]:.0f} closed trades)"
+             "<br>avg daily profit %{customdata[2]:+.3f}%<br>avg cumulative profit %{customdata[3]:+.2f}%"
+             "<br>%{customdata[0]:.0f} stocks")
 fig = go.Figure()                                           # averages only (each stock's numbers: tables below)
 for tp in main_exits:
     d = plines[tp]
     fig.add_trace(go.Scatter(x=d["month"], y=d["avg"], mode="lines", name=EXIT_LBL[tp],
                              line=dict(width=4 if tp is None else 2.2, color=EXIT_COL.get(tp, "#777")),
-                             customdata=d["n"],
-                             hovertemplate="<b>%s</b><br>month %%{x:.1f}<br>avg profit %%{y:+.2f}%%<br>%%{customdata} stocks"
-                                           "<extra></extra>" % EXIT_LBL[tp]))
+                             customdata=tip_data(tp),
+                             hovertemplate="<b>%s</b><br>month %%{x:.1f}" % EXIT_LBL[tp] + TIP_EXTRA + "<extra></extra>"))
 if show_bh:
     fig.add_trace(go.Scatter(x=avg_bh["month"], y=avg_bh["avg"], mode="lines", name="Buy & hold",
-                             line=dict(width=3, color="#2a6fdb", dash="dash"), customdata=avg_bh["n"],
-                             hovertemplate="<b>Average buy & hold</b><br>month %{x:.1f}<br>%{y:+.2f}%<br>%{customdata} stocks"
+                             line=dict(width=3, color="#2a6fdb", dash="dash"),
+                             customdata=np.column_stack([avg_bh["n"], (avg_bh["month"] * MONTH_DAYS).round()]),
+                             hovertemplate="<b>Average buy & hold</b><br>month %{x:.1f}<br>cumulative profit %{y:+.2f}%"
+                                           "<br>held since month 0: %{customdata[1]:.0f} days<br>%{customdata[0]:.0f} stocks"
                                            "<extra></extra>"))
 if show_daily:
     fig.add_trace(go.Scatter(x=avg_daily["month"], y=avg_daily["avg"], mode="lines", name="Average daily profit % (right axis)",
@@ -205,8 +223,7 @@ pick_exits = cp.EXITS                                       # every profit exit 
 
 
 with st.spinner("Building the daily profit % lines..."):
-    dlines = {tp: (avg_daily if tp is None else exit_lines(mkey, sma, stop_loss, cost, token, tp, "daily"))
-              for tp in pick_exits}
+    dlines = {tp: dlines_all[tp] for tp in pick_exits}
 dfig = go.Figure()
 vals_all = []
 for tp in pick_exits:
@@ -214,9 +231,11 @@ for tp in pick_exits:
     vals_all += list(d.loc[d["month"] >= 0.5, "avg"].dropna())
     dfig.add_trace(go.Scatter(x=d["month"], y=d["avg"], mode="lines", name=EXIT_LBL[tp],
                               line=dict(width=4 if tp is None else 2.2, color=EXIT_COL.get(tp, "#777"),
-                                        dash="solid"), customdata=d["n"],
-                              hovertemplate="<b>%s</b><br>month %%{x:.1f}<br>avg daily profit %%{y:+.3f}%%<br>"
-                                            "%%{customdata} stocks with a closed trade<extra></extra>" % EXIT_LBL[tp]))
+                                        dash="solid"),
+                              customdata=np.column_stack([d["n"], hlines[tp]["avg"].round(1), d["avg"],
+                                                          plines[tp]["avg"], hlines[tp]["n"]]),
+                              hovertemplate="<b>%s</b><br>month %%{x:.1f}" % EXIT_LBL[tp]
+                                            + TIP_EXTRA.replace("stocks", "stocks with a closed trade") + "<extra></extra>"))
 dfig.add_hline(y=0, line_color="#999", line_width=1)
 for m in range(1, AXIS_MONTHS + 1):
     dfig.add_vline(x=m, line_color="#ddd", line_width=1)
@@ -338,6 +357,28 @@ def avg_of(sl, tp):
     return float(np.mean(v)) if v else None
 
 
+def avg_key(sl, tp, key):
+    v = [r[key] for r in per[sl][tp].values() if r and r[key] is not None]
+    return float(np.mean(v)) if v else None
+
+
+def stock_tip(r):
+    """Hover text for one stock at one setting: days held per trade, cumulative profit, daily profit."""
+    if not r:
+        return "no RRG"
+    held = "%.1f" % (r["days"] / r["closed"]) if r["closed"] else "—"
+    daily = "%+.3f%%" % r["tag"] if r["tag"] is not None else "—"
+    return ("days held per trade %s (%d closed trades)<br>cumulative profit %+.2f%%<br>daily profit %s"
+            % (held, r["closed"], r["final"], daily))
+
+
+def group_tip(sl, tp):
+    held, closed, hits = held_and_trades(sl, tp)
+    fin, dly = avg_key(sl, tp, "final"), avg_key(sl, tp, "tag")
+    return ("avg days held per trade %.1f (%d closed trades)<br>avg cumulative profit %s<br>avg daily profit %s"
+            % (held, closed, "%+.2f%%" % fin if fin is not None else "—", "%+.3f%%" % dly if dly is not None else "—"))
+
+
 def held_and_trades(sl, tp):
     rs = [r for r in per[sl][tp].values() if r]
     closed = sum(r["closed"] for r in rs)
@@ -362,17 +403,19 @@ for sl in core.STOP_LOSS_OPTIONS:                  # average of all stocks: bold
                             marker=dict(size=12, color=col, line=dict(color="white", width=1.5)),
                             text=["<b>%s</b>" % lab(p[1]) for p in pts],
                             textposition="bottom center" if dx < 0 else "top center",
-                            textfont=dict(color=col, size=12), customdata=[[p[0], p[2], p[3], p[4]] for p in pts],
+                            textfont=dict(color=col, size=12),
+                            customdata=[[p[0], group_tip(sl, p[0]), p[4]] for p in pts],
                             hovertemplate="<b>Average · %g%% stop-loss</b><br>Take-profit %%{customdata[0]}%%<br>%s "
-                                          "%%{y:.%df}%%<br>Avg days held per trade %%{customdata[1]:.1f}<br>Closed trades "
-                                          "%%{customdata[2]}<br>Sold by take-profit %%{customdata[3]}<extra></extra>"
-                                          % (sl, metric_lbl[y_key], dec)))
+                                          "%%{y:.%df}%%<br>%%{customdata[1]}<br>Sold by take-profit %%{customdata[2]}"
+                                          "<extra></extra>" % (sl, metric_lbl[y_key], dec)))
     b = avg_of(sl, None)
     if b is not None:
         all_v.append(b)
         lf.add_trace(go.Scatter(x=[2, TAKE_PROFITS[-1] + 3], y=[b, b], mode="lines",
                                 name="Base, no take-profit · %g%% SL: %s" % (sl, lab(b)),
-                                line=dict(color=col, width=2, dash="dash"), hoverinfo="skip"))
+                                line=dict(color=col, width=2, dash="dash"), customdata=[group_tip(sl, None)] * 2,
+                                hovertemplate="<b>%g%% stop-loss · no take-profit (RRG exit)</b><br>%s %%{y:.%df}%%<br>"
+                                              "%%{customdata}<extra></extra>" % (sl, metric_lbl[y_key], dec)))
 for tp in TAKE_PROFITS:                            # light band per exit point: 10% left half, 15% right half
     lf.add_vrect(x0=tp - 0.85, x1=tp + 0.85, fillcolor="#eef1f6", opacity=0.6, line_width=0, layer="below")
 lf.add_hline(y=0, line_color="#999", line_width=1)
@@ -406,13 +449,13 @@ for k, sl in enumerate(core.STOP_LOSS_OPTIONS):
     ylab.append("<b>%g%% SL · AVERAGE</b>" % sl)
     zrows.append(avg_vals)
     trows.append(["<b>%s</b>" % lab(v) if v is not None else "—" for v in avg_vals])
-    hrows.append(["Average of %d stocks" % len(curves)] * len(SHOW_X))
+    hrows.append(["Average of %d stocks<br>%s" % (len(curves), group_tip(sl, tp)) for tp in SHOW_X])
     for s in stocks_order:
         vals = [val(per[sl][tp][s]) for tp in SHOW_X]
         ylab.append("%g%% SL · %s" % (sl, s))
         zrows.append(vals)
         trows.append([lab(v) if v is not None else "—" for v in vals])
-        hrows.append([INFO[s]["name"]] * len(SHOW_X))
+        hrows.append(["%s<br>%s" % (INFO[s]["name"], stock_tip(per[sl][tp][s])) for tp in SHOW_X])
 flat = [v for r in zrows for v in r if v is not None]
 cap = float(np.percentile(np.abs(flat), 90)) if flat else 1.0
 cap = cap or 1.0

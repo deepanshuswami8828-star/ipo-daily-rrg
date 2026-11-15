@@ -7,6 +7,7 @@ with a fixed amount invested (whole shares), profit % per trade, days held, and 
 over the stocks that had a closed trade. A comparison grid shows the same for Daily-close vs SMA-price RRG
 at 10% and 15% stop-loss. Everything is driven by rrg_core.TAGS, so new tags appear here automatically.
 """
+import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
@@ -176,6 +177,16 @@ if not views:
     st.info("No stock in this tag has RRG data in this period.")
 else:
     order = sorted(views, key=lambda s: views[s][1].index[0])
+
+    def trade_tip(s):
+        """Strategy summary of one stock since `since` for the hover: days held per trade and cumulative profit."""
+        r = rep["rows"].get(s)
+        if not r or not r["trades"]:
+            return "no closed trade since %s" % since.strftime("%d %b %Y")
+        return ("strategy since %s: %d closed trades<br>avg days held per trade %.1f<br>cumulative profit %+.2f%%"
+                "<br>daily profit %s" % (since.strftime("%d %b %Y"), len(r["trades"]), r["days_sum"] / len(r["trades"]),
+                                        r["profit_sum"], "%+.4f%%" % r["daily"] if r["daily"] is not None else "—"))
+
     t1, t2, t3 = st.tabs(["Quadrant timeline", "RRG trails (static)", "Price % change"])
     with t1:   # one row per stock, one coloured cell per session
         dates = sorted(set().union(*[set(views[s][1].index) for s in order]))
@@ -185,9 +196,10 @@ else:
         cs = []
         for i, q in enumerate(core.ORDER):
             cs += [[i / 4, QUAD_COLOR[q]], [(i + 1) / 4, QUAD_COLOR[q]]]
-        hm = go.Figure(go.Heatmap(z=z, x=dates, y=order, text=txt, zmin=-0.5, zmax=3.5, colorscale=cs,
+        tips = [[trade_tip(s)] * len(dates) for s in order]
+        hm = go.Figure(go.Heatmap(z=z, x=dates, y=order, text=txt, customdata=tips, zmin=-0.5, zmax=3.5, colorscale=cs,
                                   showscale=False, xgap=0, ygap=2,
-                                  hovertemplate="<b>%{y}</b> · %{x|%d %b %Y}<br>%{text}<extra></extra>"))
+                                  hovertemplate="<b>%{y}</b> · %{x|%d %b %Y}<br>%{text}<br>%{customdata}<extra></extra>"))
         hm.update_layout(height=80 + 26 * len(order), margin=dict(l=10, r=10, t=10, b=10),
                          yaxis=dict(autorange="reversed"), plot_bgcolor="#fcfcfb", paper_bgcolor="#fcfcfb")
         st.plotly_chart(hm, width="stretch", key="tv_heat")
@@ -214,8 +226,8 @@ else:
                                      text=[s], textposition="top center", marker=dict(size=10, color=c,
                                      line=dict(color="white", width=1)), legendgroup=s, showlegend=False,
                                      hovertemplate="<b>%s</b><br>%s<br>%s<br>RS-Ratio %%{x:.2f}<br>RS-Momentum %%{y:.2f}"
-                                                   "<extra></extra>" % (INFO[s]["name"], r.index[-1].strftime("%d %b %Y"),
-                                                                        r["Quadrant"].iloc[-1])))
+                                                   "<br>%s<extra></extra>" % (INFO[s]["name"], r.index[-1].strftime("%d %b %Y"),
+                                                                              r["Quadrant"].iloc[-1], trade_tip(s))))
             fig.add_trace(go.Scatter(x=r["RS_Ratio"].iloc[:1], y=r["RS_Momentum"].iloc[:1], mode="markers",
                                      marker=dict(size=6, color=c, symbol="circle-open"), legendgroup=s,
                                      showlegend=False, hovertemplate="%s start %s<extra></extra>"
@@ -244,7 +256,8 @@ else:
             a = views[s][0]; pctc = 100 * (a["Close"] / a["Close"].iloc[0] - 1)
             perf.append((s, pctc.iloc[-1], a.index[0]))
             fig.add_trace(go.Scatter(x=pctc.index, y=pctc, mode="lines", name=s, line=dict(width=1.6, color=pal[i % len(pal)]),
-                                     hovertemplate="<b>%s</b> %%{x|%%d %%b %%Y}<br>%%{y:+.1f}%%<extra></extra>" % s))
+                                     hovertemplate="<b>%s</b> %%{x|%%d %%b %%Y}<br>price %%{y:+.1f}%%<br>%s<extra></extra>"
+                                                   % (s, trade_tip(s))))
         bench = None
         for s in order:
             b = views[s][0]["Bench"]
@@ -276,9 +289,17 @@ fig = go.Figure()
 for sl, color in zip(core.STOP_LOSS_OPTIONS, ["#2a78d6", "#e65100"]):
     xs = [b for b, n, s in combos if s == sl]
     ys = [reps[(b, sl)]["avg_daily"] or 0 for b in xs]
+
+    def setup_tip(rp):
+        sums = [r["profit_sum"] for r in rp["rows"].values() if r["trades"]]
+        return ("avg days held per trade %s (%d closed trades)<br>avg cumulative profit per stock %s"
+                % ("%.1f" % rp["avg_days"] if rp["avg_days"] is not None else "—", rp["trades"],
+                   "%+.2f%%" % np.mean(sums) if sums else "—"))
     fig.add_trace(go.Bar(x=xs, y=ys, name="%g%% stop-loss" % sl, marker_color=color,
                          text=["%.4f%%" % y for y in ys], textposition="outside",
-                         hovertemplate="%{x} · " + "%g%%" % sl + " stop-loss<br>Avg daily profit %{y:.4f}%<extra></extra>"))
+                         customdata=[setup_tip(reps[(b, sl)]) for b in xs],
+                         hovertemplate="%{x} · " + "%g%%" % sl + " stop-loss<br>Avg daily profit %{y:.4f}%<br>"
+                                       "%{customdata}<extra></extra>"))
 fig.update_layout(barmode="group", height=360, margin=dict(l=10, r=10, t=30, b=10), yaxis_title="Avg daily profit %",
                   legend=dict(orientation="h", y=1.12), plot_bgcolor="#fcfcfb", paper_bgcolor="#fcfcfb")
 st.plotly_chart(fig, width="stretch", key="tags_cmp")

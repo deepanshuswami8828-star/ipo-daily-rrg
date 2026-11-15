@@ -52,15 +52,21 @@ def vintage(symbol, sma, stop_loss, cost, take_profit=None):
     win = idx[:n]
     days = np.asarray((win - start).days)
     daily = np.full(n, np.nan)
-    psum, dsum = 0.0, 0
+    held = np.zeros(n)                                     # calendar days held, closed trades so far
+    ntr = np.zeros(n)                                      # closed trades so far
+    psum, dsum, k_tr = 0.0, 0, 0
     for t in sorted((t for t in trades if t["sell"] is not None and not t["open"] and start <= t["buy"]
                      and t["sell"] <= end), key=lambda t: t["sell"]):
         psum += t["ret"]
         dsum += int((t["sell"] - t["buy"]).days)
+        k_tr += 1
+        j = idx.searchsorted(t["sell"])
+        held[j:], ntr[j:] = dsum, k_tr
         if dsum > 0:
-            daily[idx.searchsorted(t["sell"]):] = psum / dsum
+            daily[j:] = psum / dsum
     df = pd.DataFrame({"day": days, "month": days / MONTH_DAYS, "strategy": 100 * (curve[:n] - 1),
-                       "buyhold": 100 * (close[:n] / close[0] - 1), "daily": daily}, index=win)
+                       "buyhold": 100 * (close[:n] / close[0] - 1), "daily": daily, "held": held, "ntr": ntr},
+                      index=win)
     return "", start, df, [t for t in trades if t["buy"] <= end]
 
 
@@ -89,19 +95,37 @@ def average_line(curves, col):
     return pd.DataFrame({"month": grid / MONTH_DAYS, "avg": avg, "n": n})
 
 
+def pooled_line(curves, num, den):
+    """sum(num) / sum(den) over the stocks on the calendar-day grid 0..6 months (e.g. held / ntr = average
+    calendar days held per closed trade, all stocks' trades so far). -> DataFrame[month, avg, n]"""
+    grid = np.arange(0, int(MAX_MONTHS * MONTH_DAYS) + 1)
+    tn, td = np.zeros(len(grid)), np.zeros(len(grid))
+    for df in curves.values():
+        d = df["day"].to_numpy()
+        pos = np.searchsorted(d, grid, side="right") - 1
+        ok = (pos >= 0) & (grid <= d[-1])
+        tn[ok] += df[num].to_numpy(dtype=float)[pos[ok]]
+        td[ok] += df[den].to_numpy(dtype=float)[pos[ok]]
+    with np.errstate(invalid="ignore", divide="ignore"):
+        avg = np.where(td > 0, tn / np.maximum(td, 1e-12), np.nan)
+    return pd.DataFrame({"month": grid / MONTH_DAYS, "avg": avg, "n": td})
+
+
 def tp_stock(symbol, sma, stop_loss, cost, tp):
     """One stock, one stop-loss / take-profit setting, first 6 months -> dict or None (no RRG)."""
     return tp_summary(vintage(symbol, sma, stop_loss, cost, tp))
 
 
 def curve_series(v):
-    """From a vintage() result: (days since month 0 as int16, cumulative profit % as float32, Tags-method daily
-    profit % as float32) or None - compact enough to save for every stock and exit point."""
+    """From a vintage() result: (days since month 0, cumulative profit %, Tags-method daily profit %, calendar days
+    held by the closed trades so far, closed trades so far) or None - compact enough to save for every stock and
+    exit point."""
     status, _, df, _ = v
     if status:
         return None
     return (df["day"].to_numpy().astype(np.int16), df["strategy"].to_numpy().astype(np.float32),
-            df["daily"].to_numpy().astype(np.float32))
+            df["daily"].to_numpy().astype(np.float32), df["held"].to_numpy().astype(np.int32),
+            df["ntr"].to_numpy().astype(np.int16))
 
 
 def tp_summary(v):
