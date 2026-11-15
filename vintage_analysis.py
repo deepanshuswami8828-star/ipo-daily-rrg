@@ -103,13 +103,7 @@ o1, o3 = st.columns(2)
 show_bh = o1.toggle("Also show buy & hold average", value=True, key="vin_bh")
 show_daily = o3.toggle("Show average daily profit % line", value=False, key="vin_daily",
                        help="The same line (no take-profit) is in its own chart below, with one line per profit exit point.")
-fig = go.Figure()
-for i, (s, df) in enumerate(curves.items()):                # every stock's line (hide one by clicking it in the legend)
-    fig.add_trace(go.Scatter(x=df["month"], y=df["strategy"], mode="lines", name=s, opacity=0.45,
-                             line=dict(width=1.3, color=PAL[i % len(PAL)]),
-                             hovertemplate="<b>%s</b> · %%{customdata}<br>month %%{x:.1f}<br>strategy %%{y:+.1f}%%"
-                                           "<extra></extra>" % s,
-                             customdata=df.index.strftime("%d %b %Y")))
+fig = go.Figure()                                           # averages only (each stock's numbers: tables below)
 fig.add_trace(go.Scatter(x=avg["month"], y=avg["avg"], mode="lines", name="Average strategy profit",
                          line=dict(width=4, color="black"), customdata=avg["n"],
                          hovertemplate="<b>Average strategy</b><br>month %{x:.1f}<br>%{y:+.2f}%<br>%{customdata} stocks"
@@ -140,7 +134,7 @@ fig.update_layout(height=600, margin=dict(l=10, r=10, t=40, b=10),
 st.plotly_chart(fig, width="stretch", key="vin_chart")
 st.caption("Black line = simple average of the strategy's profit % over the stocks that have reached that month "
            "(hover for how many). A stock whose RRG started less than 6 months ago stops at its latest session, so "
-           "later months average fewer stocks. Click a name in the legend to hide it.")
+           "later months average fewer stocks. Each stock's own numbers are in the trades table below.")
 
 # ---- vintage view of the average daily profit %, one line per profit exit point ---------------------
 st.markdown("### Average daily profit % — vintage view, one line per profit exit point")
@@ -319,23 +313,6 @@ SL_SHIFT = {core.STOP_LOSS_OPTIONS[0]: -GAP, core.STOP_LOSS_OPTIONS[-1]: +GAP}
 SL_LIGHT = {10.0: "rgba(42,120,214,0.30)", 15.0: "rgba(230,81,0,0.30)"}
 lf = go.Figure()
 all_v = []
-for sl in core.STOP_LOSS_OPTIONS:                  # every stock: thin line in its stop-loss colour (always shown)
-    col, dx = SL_COL.get(sl, "#555"), SL_SHIFT.get(sl, 0)
-    first = True
-    for s in curves:
-        ys = [val(per[sl][tp][s]) for tp in TAKE_PROFITS]
-        if all(y is None for y in ys):
-            continue
-        all_v += [y for y in ys if y is not None]
-        lf.add_trace(go.Scatter(x=[tp + dx for tp in TAKE_PROFITS], y=ys, mode="lines+markers",
-                                name="Each stock · %g%% stop-loss" % sl, legendgroup="stk%g" % sl, showlegend=first,
-                                line=dict(color=SL_LIGHT.get(sl, col), width=1.2),
-                                marker=dict(size=5, color=SL_LIGHT.get(sl, col)),
-                                customdata=[[s, INFO[s]["name"], tp] for tp in TAKE_PROFITS],
-                                hovertemplate="<b>%%{customdata[0]}</b> · %%{customdata[1]}<br>%g%% stop-loss · take-profit "
-                                              "%%{customdata[2]}%%<br>%s %%{y:+.%df}%%<extra></extra>"
-                                              % (sl, metric_lbl[y_key], dec)))
-        first = False
 for sl in core.STOP_LOSS_OPTIONS:                  # average of all stocks: bold line in the same colour
     col, dx = SL_COL.get(sl, "#555"), SL_SHIFT.get(sl, 0)
     pts = [(tp, avg_of(sl, tp)) + held_and_trades(sl, tp) for tp in TAKE_PROFITS]
@@ -373,9 +350,9 @@ lf.update_layout(height=650, margin=dict(l=70, r=20, t=60, b=10), hovermode="clo
                  legend=dict(orientation="h", y=-0.12, font=dict(size=11)),
                  plot_bgcolor="#fcfcfb", paper_bgcolor="#fcfcfb")
 st.plotly_chart(lf, width="stretch", key="vin_tp_lines")
-st.caption("Thin blue lines = every stock with 10% stop-loss, thin orange lines = every stock with 15% stop-loss; "
-           "bold lines = their averages; dashed = average without take-profit. At each exit point the two groups sit "
-           "side by side with a small gap (10% left, 15% right). Hover a line to see the stock.")
+st.caption("Blue = average of all stocks with 10% stop-loss, orange = with 15% stop-loss; dashed = the same average "
+           "without take-profit. At each exit point the two sit side by side with a small gap (10% left, 15% right). "
+           "Every stock's own numbers are in the grid and tables below.")
 
 st.markdown("#### Every stock at every exit point — 10% stop-loss block on top, 15% block below")
 SHOW_X = [None] + TAKE_PROFITS                     # first column = base (no take-profit)
