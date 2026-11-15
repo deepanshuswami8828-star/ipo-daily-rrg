@@ -128,12 +128,9 @@ def exit_lines(members_key, sma, stop_loss, cost, token, tp, col):
 
 
 mkey = tuple(curves)
-o1, o2, o3 = st.columns([1.1, 2.6, 1.3])
+o1, o3 = st.columns(2)
 show_bh = o1.toggle("Also show buy & hold average", value=True, key="vin_bh")
-main_exits = o2.multiselect("Profit exit points (lines)", cp.EXITS, default=cp.EXITS, key="vin_main_exits",
-                            format_func=EXIT_LBL.get,
-                            help="One line per exit point: the average cumulative profit % if every trade is also sold "
-                                 "when the daily close is up x%. RRG exit = no take-profit.")
+main_exits = cp.EXITS                                       # every profit exit point, always shown
 show_daily = o3.toggle("Show average daily profit % line", value=False, key="vin_daily",
                        help="The same line (no take-profit) is in its own chart below, with one line per profit exit point.")
 with st.spinner("Building the profit lines..."):
@@ -201,8 +198,7 @@ st.caption("Same stocks and month-0 clock as above. For every stock, **daily pro
            "analysis method. The line is the average over the stocks that have a closed trade by then. One line per profit "
            "exit point: **black = RRG exit only (no take-profit)**; coloured = sell when the daily close is up x%%. "
            "Daily RRG on %s · %g%% stop-loss (change it at the top)." % (basis_txt, stop_loss))
-pick_exits = st.multiselect("Profit exit points to show", cp.EXITS, default=cp.EXITS, key="vin_daily_exits",
-                            format_func=EXIT_LBL.get)
+pick_exits = cp.EXITS                                       # every profit exit point, always shown
 
 
 with st.spinner("Building the daily profit % lines..."):
