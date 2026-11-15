@@ -99,26 +99,65 @@ m4.metric("Avg daily profit %", "%+.4f%%" % np.mean(tag_daily) if tag_daily else
           help="As on the Tags analysis page: each stock's closed trades in the first 6 months, sum of profit % ÷ "
                "sum of calendar days held in those trades; simple average over stocks with a closed trade.")
 
-o1, o3 = st.columns(2)
+EXIT_COL = {None: "#111111", 5: "#9e0142", 7: "#d53e4f", 10: "#f46d43", 12: "#fdae61", 15: "#e6c229",
+            17: "#abdda4", 20: "#66c2a5", 25: "#3288bd", 30: "#5e4fa2"}
+EXIT_LBL = {tp: ("RRG exit (no take-profit)" if tp is None else "Take-profit %d%%" % tp) for tp in cp.EXITS}
+
+
+def exit_curves(tp):
+    """{symbol: DataFrame[day, strategy, daily]} for the stocks shown at this profit exit point
+    (saved results when available, else calculated)."""
+    out = {}
+    for s in curves:
+        if tp is None:
+            out[s] = curves[s][["day", "strategy", "daily"]]
+            continue
+        got = RES.get(("curve", s, sma, stop_loss, tp), "missing") if saved_ok(sma, cost) else "missing"
+        if got == "missing":
+            got = cp.curve_series(vintage(s, sma, stop_loss, cost, token, tp))
+        if got is not None:
+            out[s] = pd.DataFrame({"day": got[0].astype(int), "strategy": got[1].astype(float),
+                                   "daily": got[2].astype(float)})
+    return out
+
+
+@st.cache_data(show_spinner=False, max_entries=64)
+def exit_lines(members_key, sma, stop_loss, cost, token, tp, col):
+    """Average line of `col` over the stocks shown, at one exit point (cached per setting)."""
+    return average_line(exit_curves(tp), col)
+
+
+mkey = tuple(curves)
+o1, o2, o3 = st.columns([1.1, 2.6, 1.3])
 show_bh = o1.toggle("Also show buy & hold average", value=True, key="vin_bh")
+main_exits = o2.multiselect("Profit exit points (lines)", cp.EXITS, default=cp.EXITS, key="vin_main_exits",
+                            format_func=EXIT_LBL.get,
+                            help="One line per exit point: the average cumulative profit % if every trade is also sold "
+                                 "when the daily close is up x%. RRG exit = no take-profit.")
 show_daily = o3.toggle("Show average daily profit % line", value=False, key="vin_daily",
                        help="The same line (no take-profit) is in its own chart below, with one line per profit exit point.")
+with st.spinner("Building the profit lines..."):
+    plines = {tp: (avg if tp is None else exit_lines(mkey, sma, stop_loss, cost, token, tp, "strategy"))
+              for tp in main_exits}
 fig = go.Figure()                                           # averages only (each stock's numbers: tables below)
-fig.add_trace(go.Scatter(x=avg["month"], y=avg["avg"], mode="lines", name="Average strategy profit",
-                         line=dict(width=4, color="black"), customdata=avg["n"],
-                         hovertemplate="<b>Average strategy</b><br>month %{x:.1f}<br>%{y:+.2f}%<br>%{customdata} stocks"
-                                       "<extra></extra>"))
+for tp in main_exits:
+    d = plines[tp]
+    fig.add_trace(go.Scatter(x=d["month"], y=d["avg"], mode="lines", name=EXIT_LBL[tp],
+                             line=dict(width=4 if tp is None else 2.2, color=EXIT_COL.get(tp, "#777")),
+                             customdata=d["n"],
+                             hovertemplate="<b>%s</b><br>month %%{x:.1f}<br>avg profit %%{y:+.2f}%%<br>%%{customdata} stocks"
+                                           "<extra></extra>" % EXIT_LBL[tp]))
 if show_bh:
-    fig.add_trace(go.Scatter(x=avg_bh["month"], y=avg_bh["avg"], mode="lines", name="Average buy & hold",
+    fig.add_trace(go.Scatter(x=avg_bh["month"], y=avg_bh["avg"], mode="lines", name="Buy & hold",
                              line=dict(width=3, color="#2a6fdb", dash="dash"), customdata=avg_bh["n"],
                              hovertemplate="<b>Average buy & hold</b><br>month %{x:.1f}<br>%{y:+.2f}%<br>%{customdata} stocks"
                                            "<extra></extra>"))
 if show_daily:
     fig.add_trace(go.Scatter(x=avg_daily["month"], y=avg_daily["avg"], mode="lines", name="Average daily profit % (right axis)",
-                             line=dict(width=3, color="#e65100"), yaxis="y2", customdata=avg_daily["n"],
+                             line=dict(width=3, color="#e65100", dash="dot"), yaxis="y2", customdata=avg_daily["n"],
                              hovertemplate="<b>Average daily profit</b><br>month %{x:.1f}<br>%{y:+.4f}% per day"
                                            "<br>%{customdata} stocks with a closed trade<extra></extra>"))
-    lim =np.nanmax(np.abs(avg_daily["avg"].iloc[7:])) if avg_daily["avg"].iloc[7:].notna().any() else 1
+    lim = np.nanmax(np.abs(avg_daily["avg"].iloc[7:])) if avg_daily["avg"].iloc[7:].notna().any() else 1
     fig.update_layout(yaxis2=dict(title="Average daily profit % (per day)", overlaying="y", side="right",
                                   ticksuffix="%", showgrid=False, zeroline=True, zerolinecolor="#e65100",
                                   range=[-lim * 1.6, lim * 1.6], color="#e65100"))
@@ -132,9 +171,28 @@ fig.update_layout(height=600, margin=dict(l=10, r=10, t=40, b=10),
                   yaxis=dict(title="Cumulative profit %", ticksuffix="%"), hovermode="closest",
                   plot_bgcolor="#fcfcfb", paper_bgcolor="#fcfcfb", legend=dict(font=dict(size=10)))
 st.plotly_chart(fig, width="stretch", key="vin_chart")
-st.caption("Black line = simple average of the strategy's profit % over the stocks that have reached that month "
-           "(hover for how many). A stock whose RRG started less than 6 months ago stops at its latest session, so "
-           "later months average fewer stocks. Each stock's own numbers are in the trades table below.")
+st.caption("Each line = simple average of the strategy's cumulative profit % over the stocks that have reached that "
+           "month (hover for how many). **Black = RRG exit only (no take-profit)**; coloured = the same strategy that also "
+           "sells when the daily close is up 5%…30% (after a take-profit it buys again only once the Daily RRG goes down "
+           "and comes back up). Blue dashed = buy & hold. A stock whose RRG started less than 6 months ago stops at its "
+           "latest session, so later months average fewer stocks. Click a name in the legend to hide that line.")
+pm_rows = []
+for tp in main_exits:
+    d = plines[tp]
+    row = {"Profit exit point": EXIT_LBL[tp]}
+    for mth in range(1, MAX_MONTHS + 1):
+        hit = d[(d["month"] * MONTH_DAYS).round() <= int(round(mth * MONTH_DAYS))]
+        v = hit["avg"].iloc[-1] if len(hit) else np.nan
+        row["M%d" % mth] = None if pd.isna(v) else round(float(v), 2)
+    row["Stocks at M6"] = int(d["n"].iloc[-1])
+    pm_rows.append(row)
+if pm_rows:
+    _pm = pd.DataFrame(pm_rows)
+    _mc = ["M%d" % m for m in range(1, MAX_MONTHS + 1)]
+    st.dataframe(_pm.style.map(lambda v: ("color:%s" % ("#2e7d32" if v > 0 else "#c62828" if v < 0 else "inherit"))
+                               if isinstance(v, (int, float)) and not pd.isna(v) else "", subset=_mc)
+                 .format({c: "{:+.2f}" for c in _mc}, na_rep="—"), hide_index=True, width="stretch")
+    st.caption("Average cumulative profit % at the end of each month after month 0, one row per profit exit point.")
 
 # ---- vintage view of the average daily profit %, one line per profit exit point ---------------------
 st.markdown("### Average daily profit % — vintage view, one line per profit exit point")
@@ -143,31 +201,13 @@ st.caption("Same stocks and month-0 clock as above. For every stock, **daily pro
            "analysis method. The line is the average over the stocks that have a closed trade by then. One line per profit "
            "exit point: **black = RRG exit only (no take-profit)**; coloured = sell when the daily close is up x%%. "
            "Daily RRG on %s · %g%% stop-loss (change it at the top)." % (basis_txt, stop_loss))
-EXIT_COL = {None: "#111111", 5: "#9e0142", 7: "#d53e4f", 10: "#f46d43", 12: "#fdae61", 15: "#e6c229",
-            17: "#abdda4", 20: "#66c2a5", 25: "#3288bd", 30: "#5e4fa2"}
-EXIT_LBL = {tp: ("RRG exit (no take-profit)" if tp is None else "Take-profit %d%%" % tp) for tp in cp.EXITS}
 pick_exits = st.multiselect("Profit exit points to show", cp.EXITS, default=cp.EXITS, key="vin_daily_exits",
                             format_func=EXIT_LBL.get)
 
 
-def daily_curves(tp):
-    """{symbol: DataFrame[day, daily]} for the stocks shown, at this exit point (saved results when available)."""
-    out = {}
-    for s in curves:
-        if tp is None:
-            out[s] = curves[s][["day", "daily"]]
-            continue
-        got = RES.get(("daily", s, sma, stop_loss, tp), "missing") if saved_ok(sma, cost) else "missing"
-        if got == "missing":
-            v = vintage(s, sma, stop_loss, cost, token, tp)
-            got = cp.daily_series(v)
-        if got is not None:
-            out[s] = pd.DataFrame({"day": got[0].astype(int), "daily": got[1].astype(float)})
-    return out
-
-
 with st.spinner("Building the daily profit % lines..."):
-    dlines = {tp: average_line(daily_curves(tp), "daily") for tp in pick_exits}
+    dlines = {tp: (avg_daily if tp is None else exit_lines(mkey, sma, stop_loss, cost, token, tp, "daily"))
+              for tp in pick_exits}
 dfig = go.Figure()
 vals_all = []
 for tp in pick_exits:

@@ -92,7 +92,8 @@ def build(refresh=False, log=print):
                 for tp in cp.EXITS:
                     v = cp.vintage(s, sma, sl, cost, tp)
                     items[("tp", s, sma, sl, tp)] = cp.tp_summary(v)
-                    items[("daily", s, sma, sl, tp)] = cp.daily_series(v)
+                    if tp is not None:            # no-take-profit curves are calculated with the page anyway
+                        items[("curve", s, sma, sl, tp)] = cp.curve_series(v)
             items[("rule", s, sma)] = cp.rule_check_stock(s, sma, cost)
             items[("replay", s, sma)] = cp.replay(s, sma, r["tp"], r["sl"], cost, r["amount"], r["only6"])
         if i % 10 == 0 or i == len(symbols):

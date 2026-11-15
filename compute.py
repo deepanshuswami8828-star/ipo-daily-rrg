@@ -94,12 +94,14 @@ def tp_stock(symbol, sma, stop_loss, cost, tp):
     return tp_summary(vintage(symbol, sma, stop_loss, cost, tp))
 
 
-def daily_series(v):
-    """From a vintage() result: (days since month 0 as int16, Tags-method daily profit % as float32) or None."""
+def curve_series(v):
+    """From a vintage() result: (days since month 0 as int16, cumulative profit % as float32, Tags-method daily
+    profit % as float32) or None - compact enough to save for every stock and exit point."""
     status, _, df, _ = v
     if status:
         return None
-    return df["day"].to_numpy().astype(np.int16), df["daily"].to_numpy().astype(np.float32)
+    return (df["day"].to_numpy().astype(np.int16), df["strategy"].to_numpy().astype(np.float32),
+            df["daily"].to_numpy().astype(np.float32))
 
 
 def tp_summary(v):
