@@ -2,7 +2,7 @@
 Vintage tab (own page in the top navigation of app.py).
 
 Every stock is lined up on its own clock: month 0 = the stock's first Daily RRG session (the day the RRG chart
-starts, after the EMA warm-up), up to month 6. For each stock the Daily RRG strategy's cumulative profit % is
+starts, after the EMA warm-up), up to month 12 (1 year). For each stock the Daily RRG strategy's cumulative profit % is
 marked to market every day (open trades at that day's close, charges included), and a bold line shows the
 average over the stocks that have reached that point. Works on the daily-close or SMA-price RRG.
 """
@@ -38,9 +38,10 @@ def saved_ok(sma, cost):
 
 
 # ---- page -------------------------------------------------------------------------------------
-st.title("📅 Vintage chart — month 0 to 6 of the RRG")
+st.title("📅 Vintage chart — month 0 to %d of the RRG" % MAX_MONTHS)
 st.caption("Each stock on its own clock: **month 0 = the day its Daily RRG chart starts** (first RRG session after the "
-           "warm-up), up to month 6. Line = the Daily RRG strategy's cumulative profit %, marked to market every day.")
+           "warm-up), up to month %d (1 year). Line = the Daily RRG strategy's cumulative profit %%, marked to market every "
+           "day." % MAX_MONTHS)
 token = (st.session_state.get("token", 0), RES.fingerprint())   # cache key: data refresh + code version
 _m = RES.meta()
 st.caption(("⚡ Using results saved on %s (data up to %s) — settings other than daily close / SMA %d with %.2f%% "
@@ -70,7 +71,7 @@ if q:
     st.caption("🔍 %d of %d stocks match “%s”: %s" % (len(members), len(an.stocks_in(tag, sec)), q, ", ".join(members)))
 
 curves, starts, trades_by, left_out = {}, {}, {}, {}
-with st.spinner("Building every stock's first 6 months..."):
+with st.spinner("Building every stock's first %d months..." % MAX_MONTHS):
     for s in members:
         status, start, df, trs = vintage(s, sma, stop_loss, cost, token)
         if status:
@@ -96,9 +97,9 @@ for s, trs in trades_by.items():
         tag_daily.append(sum(t["ret"] for t in closed) / d)
 m1, m2, m4 = st.columns(3)
 m1.metric("Stocks", len(curves))
-m2.metric("Avg profit % at month 6 / latest", "%+.2f%%" % np.mean([df["strategy"].iloc[-1] for df in curves.values()]))
+m2.metric("Avg profit %% at month %d / latest" % MAX_MONTHS, "%+.2f%%" % np.mean([df["strategy"].iloc[-1] for df in curves.values()]))
 m4.metric("Avg daily profit %", "%+.4f%%" % np.mean(tag_daily) if tag_daily else "—",
-          help="As on the Tags analysis page: each stock's closed trades in the first 6 months, sum of profit % ÷ "
+          help="As on the Tags analysis page: each stock's closed trades in the first 12 months, sum of profit % ÷ "
                "sum of calendar days held in those trades; simple average over stocks with a closed trade.")
 
 EXIT_COL = {None: "#111111", 5: "#9e0142", 7: "#d53e4f", 10: "#f46d43", 12: "#fdae61", 15: "#e6c229",
@@ -192,7 +193,7 @@ st.caption("Each line = simple average of the strategy's cumulative profit % ove
            "month (hover for how many). **Black = RRG exit only (no take-profit)**; coloured = the same strategy that also "
            "sells when the daily close is up 5%…30% (after a take-profit it buys again only once the Daily RRG goes down "
            "and comes back up; a buy right after a 1-2 session dip back into the same quadrant is skipped as a false "
-           "trigger). Blue dashed = buy & hold. A stock whose RRG started less than 6 months ago stops at its "
+           "trigger). Blue dashed = buy & hold. A stock whose RRG started less than 12 months ago stops at its "
            "latest session, so later months average fewer stocks. Click a name in the legend to hide that line.")
 pm_rows = []
 for tp in main_exits:
@@ -202,7 +203,7 @@ for tp in main_exits:
         hit = d[(d["month"] * MONTH_DAYS).round() <= int(round(mth * MONTH_DAYS))]
         v = hit["avg"].iloc[-1] if len(hit) else np.nan
         row["M%d" % mth] = None if pd.isna(v) else round(float(v), 2)
-    row["Stocks at M6"] = int(d["n"].iloc[-1])
+    row["Stocks at M%d" % MAX_MONTHS] = int(d["n"].iloc[-1])
     pm_rows.append(row)
 if pm_rows:
     _pm = pd.DataFrame(pm_rows)
@@ -261,7 +262,7 @@ for tp in pick_exits:
         hit = d[(d["month"] * MONTH_DAYS).round() <= day]
         v = hit["avg"].iloc[-1] if len(hit) else np.nan
         row["M%d" % mth] = None if pd.isna(v) or hit["n"].iloc[-1] == 0 else round(float(v), 4)
-    row["Stocks at M6"] = int(d["n"].iloc[-1])
+    row["Stocks at M%d" % MAX_MONTHS] = int(d["n"].iloc[-1])
     mrows.append(row)
 mt = pd.DataFrame(mrows)
 mcols_d = ["M%d" % m for m in range(1, MAX_MONTHS + 1)]
@@ -272,14 +273,14 @@ st.caption("Average daily profit % at the end of each month after month 0 (— =
            "Early months average few trades, so they move a lot. The y-axis is scaled on month 0.5 onwards; hover a "
            "line for its exact value and how many stocks it averages. Click a name in the legend to hide it.")
 
-# ---- trades in the first 6 months (same columns as the Tags analysis table) ------------------------
+# ---- trades in the first 12 months (same columns as the Tags analysis table) ------------------------
 def colour(v):
     if isinstance(v, (int, float)) and not pd.isna(v):
         return "color:%s" % ("#2e7d32" if v > 0 else "#c62828" if v < 0 else "inherit")
     return ""
 
 
-st.markdown("#### Every trade in the first 6 months")
+st.markdown("#### Every trade in the first %d months" % MAX_MONTHS)
 rows = []
 for s, df in curves.items():
     end6 = starts[s] + pd.Timedelta(days=round(MAX_MONTHS * MONTH_DAYS))
@@ -294,7 +295,7 @@ for s, df in curves.items():
         "Days held per trade": ", ".join(str(d) for d in days) or "—",
         "Sum of profit %": round(sum(profits), 2), "Sum of days held": sum(days),
         "Daily profit %": round(sum(profits) / sum(days), 4) if sum(days) > 0 else None,
-        "Open / after 6 m": len(still),
+        "Open / after %d m" % MAX_MONTHS: len(still),
     })
 tbl = pd.DataFrame(rows)
 with_d = tbl["Daily profit %"].dropna()
@@ -302,17 +303,17 @@ avg_row = {"Ticker": "TOTAL / AVG", "Stock": "%d stocks" % len(tbl), "Sector": "
            "Number of trades": int(tbl["Number of trades"].sum()), "Profit % per trade": "", "Days held per trade": "",
            "Sum of profit %": round(tbl["Sum of profit %"].sum(), 2), "Sum of days held": int(tbl["Sum of days held"].sum()),
            "Daily profit %": round(with_d.mean(), 4) if len(with_d) else None,
-           "Open / after 6 m": int(tbl["Open / after 6 m"].sum())}
+           "Open / after %d m" % MAX_MONTHS: int(tbl["Open / after %d m" % MAX_MONTHS].sum())}
 full = pd.concat([tbl, pd.DataFrame([avg_row])], ignore_index=True)
 st.dataframe(full.style.map(colour, subset=["Sum of profit %", "Daily profit %"])
              .format({"Sum of profit %": "{:+.2f}", "Daily profit %": "{:+.4f}"}, na_rep="—"),
              hide_index=True, width="stretch", height=38 + 35 * len(full),
              column_config={"Profit % per trade": st.column_config.TextColumn(width="large"),
                             "Days held per trade": st.column_config.TextColumn(width="medium")})
-st.caption("Closed trades bought and sold within the first 6 months after month 0, with the settings above "
+st.caption("Closed trades bought and sold within the first 12 months after month 0, with the settings above "
            "(%s, %g%% stop-loss, charges %g%% per side). Daily profit %% = sum of profit %% ÷ sum of calendar days "
            "held; the last row's Daily profit %% is the simple average over stocks with a closed trade. "
-           "'Open / after 6 m' = trades still open or sold after month 6 (not counted). Historical test, not advice."
+           "'Open / after 12 m' = trades still open or sold after month 12 (not counted). Historical test, not advice."
            % (basis_txt, stop_loss, cost))
 
 
@@ -334,10 +335,10 @@ st.caption("Built like the *Take-profit threshold analysis* chart of the help fo
            "at that close (x%% profit booked); after that it buys again only once the Daily RRG has gone into "
            "Weakening/Lagging and come back up, as after a stop-loss. One colour per stop-loss: **solid line = with "
            "take-profit (average of all stocks)**, **dashed line = base strategy without take-profit** at the same "
-           "stop-loss, faint dots = each stock. First 6 months from month 0 · RRG on %s · charges as above. "
+           "stop-loss, faint dots = each stock. First 12 months from month 0 · RRG on %s · charges as above. "
            "Hover a point for the average days held per trade and the trades." % basis_txt)
 metric_lbl = {"tag": "Avg daily profit %",
-              "final": "Avg profit % (month 6 / latest)"}
+              "final": "Avg profit %% (month %d / latest)" % MAX_MONTHS}
 y_key = st.radio("Y-axis", list(metric_lbl), format_func=metric_lbl.get, horizontal=True, key="vin_tp_y",
                  help="Avg daily profit % = as on the Tags analysis page: each stock's closed trades, sum of profit % ÷ "
                       "sum of calendar days held; simple average over stocks with a closed trade.")
@@ -422,7 +423,7 @@ lf.add_hline(y=0, line_color="#999", line_width=1)
 lo, hi = (min(all_v + [0]), max(all_v + [0]))
 pad = (hi - lo) * 0.06 or 1
 lf.update_layout(height=650, margin=dict(l=70, r=20, t=60, b=10), hovermode="closest",
-                 title=dict(text="%s · %d stocks · first 6 months  —  at every exit point: <span style='color:%s'>"
+                 title=dict(text="%s · %d stocks · first 12 months  —  at every exit point: <span style='color:%s'>"
                                  "<b>10%% stop-loss on the left</b></span>, <span style='color:%s'><b>15%% stop-loss on the "
                                  "right</b></span>" % (an.view_name(tag, sec), len(curves),
                                                        SL_COL[10.0], SL_COL[15.0]), font=dict(size=14)),
@@ -472,7 +473,7 @@ for k, sl in enumerate(core.STOP_LOSS_OPTIONS):        # lane titles on the left
     hm.add_shape(type="rect", xref="paper", yref="y", x0=-0.005, x1=1.0, y0=first - 0.5, y1=first + len(curves) + 0.5,
                  line=dict(color=SL_COL.get(sl, "#555"), width=2.5), fillcolor="rgba(0,0,0,0)", layer="above")
 hm.update_layout(height=140 + 24 * n_rows, margin=dict(l=170, r=10, t=110, b=10),
-                 title=dict(text="%s · %d stocks · Daily RRG on %s · first 6 months  —  top: %g%% stop-loss · bottom: "
+                 title=dict(text="%s · %d stocks · Daily RRG on %s · first 12 months  —  top: %g%% stop-loss · bottom: "
                                  "%g%% stop-loss" % (an.view_name(tag, sec), len(curves), basis_txt,
                                                      core.STOP_LOSS_OPTIONS[0], core.STOP_LOSS_OPTIONS[-1]),
                             font=dict(size=14), y=0.995, yanchor="top"),
@@ -546,7 +547,7 @@ st.caption("The charts above use the app's simple rules (trade at (open + close)
 r1, r2, r3, r4 = st.columns(4)
 rtp = r1.number_input("Take-profit %", 1.0, 100.0, 10.0, 1.0, key="rp_tp")
 rsl = r2.number_input("Stop-loss %", 1.0, 50.0, 10.0, 1.0, key="rp_sl")
-r6m = r3.toggle("Only the first 6 months", value=True, key="rp_6m")
+r6m = r3.toggle("Only the first %d months" % MAX_MONTHS, value=True, key="rp_6m")
 ramt = r4.number_input("₹ per trade", 1000.0, 1e8, 100000.0, 10000.0, format="%.0f", key="rp_amt")
 
 

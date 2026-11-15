@@ -2,7 +2,7 @@
 compute.py - the heavy calculations of the Vintage page, with no Streamlit code, so that build_cache.py can run
 them once and save the results (results.py) and the page can fall back to them for settings not saved.
 
-Month 0 = a stock's first Daily RRG session; the vintage window is month 0 to month 6.
+Month 0 = a stock's first Daily RRG session; the vintage window is month 0 to month 12 (1 year).
 """
 import numpy as np
 import pandas as pd
@@ -11,7 +11,7 @@ import rrg_core as core
 from rrg_core import INFO
 
 MONTH_DAYS = 30.4375
-MAX_MONTHS = 6
+MAX_MONTHS = 12                                        # vintage window: month 0 to month 12 (1 year)
 TAKE_PROFITS = [5, 7, 10, 12, 15, 17, 20, 25, 30]     # profit exit points (%) on the take-profit charts
 EXITS = [None] + TAKE_PROFITS                          # None = no take-profit (sold on the Daily RRG only)
 WINDOW_DAYS = int(round(MAX_MONTHS * MONTH_DAYS))
@@ -25,7 +25,7 @@ def _status(symbol, exc=None, n=0):
 
 
 def vintage(symbol, sma, stop_loss, cost, take_profit=None):
-    """(status, start, DataFrame[day, month, strategy %, buyhold %, daily %], trades bought by month 6).
+    """(status, start, DataFrame[day, month, strategy %, buyhold %, daily %], trades bought by the end of the window).
     status '' = ok. strategy % is marked to market every session (open trades at that day's close, charges in);
     daily % = Tags-method daily profit of the closed trades so far (sum of profit % / sum of days held)."""
     try:
@@ -71,13 +71,13 @@ def vintage(symbol, sma, stop_loss, cost, take_profit=None):
 
 
 def in_window(trades, start):
-    """Closed trades bought AND sold between month 0 and month 6 (the vintage window)."""
+    """Closed trades bought AND sold between month 0 and month 12 (the vintage window)."""
     end = start + pd.Timedelta(days=WINDOW_DAYS)
     return [t for t in trades if not t["open"] and t["sell"] is not None and start <= t["buy"] and t["sell"] <= end]
 
 
 def average_line(curves, col):
-    """Average of `col` over stocks on a calendar-day grid 0..6 months. A stock counts from its first value
+    """Average of `col` over stocks on a calendar-day grid 0..12 months. A stock counts from its first value
     (carried forward between sessions) up to its last session. -> DataFrame[month, avg, n]"""
     grid = np.arange(0, int(MAX_MONTHS * MONTH_DAYS) + 1)
     if not curves:
@@ -96,7 +96,7 @@ def average_line(curves, col):
 
 
 def pooled_line(curves, num, den):
-    """sum(num) / sum(den) over the stocks on the calendar-day grid 0..6 months (e.g. held / ntr = average
+    """sum(num) / sum(den) over the stocks on the calendar-day grid 0..12 months (e.g. held / ntr = average
     calendar days held per closed trade, all stocks' trades so far). -> DataFrame[month, avg, n]"""
     grid = np.arange(0, int(MAX_MONTHS * MONTH_DAYS) + 1)
     tn, td = np.zeros(len(grid)), np.zeros(len(grid))
@@ -112,7 +112,7 @@ def pooled_line(curves, num, den):
 
 
 def tp_stock(symbol, sma, stop_loss, cost, tp):
-    """One stock, one stop-loss / take-profit setting, first 6 months -> dict or None (no RRG)."""
+    """One stock, one stop-loss / take-profit setting, first 12 months -> dict or None (no RRG)."""
     return tp_summary(vintage(symbol, sma, stop_loss, cost, tp))
 
 
