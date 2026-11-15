@@ -12,7 +12,8 @@ The RRG can be built on the daily close or on an N-day SMA of price.
 
 - `app.py` - the Streamlit app; top navigation: RRG charts, Tags analysis, Vintage
 - `tags_analysis.py` - per-tag strategy profitability, static time view, setup comparison
-- `vintage_analysis.py` - month 0-6 vintage view, take-profit analysis, realistic OHLCV replay
+- `vintage_analysis.py` - month 0-12 vintage view, take-profit analysis, realistic OHLCV replay
+- Tags, Vintage and All stocks can be filtered by tag, sector and IPO launch period (Apr 2026 onwards, Oct 2025 - Mar 2026, Apr 2025 - Sep 2025, before Apr 2025; by listing date)
 - `rrg_core.py` - stock list and tags, data download, Daily RRG formula, strategy rules
 - `analysis.py` - stock profiles, search, validation, quadrant periods, cycles, rupee simulation
 - `compute.py` - the Vintage page's heavy calculations (no Streamlit code)

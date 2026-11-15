@@ -57,18 +57,28 @@ sma = int(c3.number_input("SMA days", 2, 200, core.SMA_DEFAULT, 1, key="vin_sma"
 stop_loss = c4.radio("Stop-loss", core.STOP_LOSS_OPTIONS, horizontal=True, key="vin_sl", format_func=lambda v: "%g%%" % v)
 cost = c5.number_input("Charges / side (%)", 0.0, 1.0, core.COST_PCT, 0.01, key="vin_cost")
 basis_txt = "SMA %d price" % sma if sma else "daily close"
-k1, k2 = st.columns([1, 2])
+k1, k3, k2 = st.columns([1, 1, 1.6])
+per_now = st.session_state.get("vin_period", an.ALL_PERIODS)
 sec = k1.selectbox("Sector", an.sector_options(tag), key="vin_sector",
-                   format_func=lambda x: an.sector_label(x, tag))
+                   format_func=lambda x: an.sector_label(x, tag, per_now))
+ipo_per = k3.selectbox("IPO launch period", an.period_options(), key="vin_period",
+                   format_func=lambda x: an.period_label(x, tag, sec),
+                   help="Groups by listing date: Apr 2026 onwards · Oct 2025 – Mar 2026 · Apr 2025 – Sep 2025 · "
+                        "before Apr 2025. Counts are within the chosen tag and sector. Recent IPOs have fewer months "
+                        "of RRG, so they only reach the early months of the chart.")
 q = k2.text_input("🔍 Search stock", key="vin_search", placeholder="name, ticker, sector, city or tag — leave empty for the whole tag",
                   help="Every word must match, e.g. 'kaynes', 'jewel', 'technology'. Charts, averages and tables below "
                        "then use only the matching stocks.")
-members = an.search_stocks(an.stocks_in(tag, sec), q)
+group = an.stocks_in(tag, sec, ipo_per)
+members = an.search_stocks(group, q)
+if not group:
+    st.warning("No stock in %s — pick another sector or launch period." % an.view_name(tag, sec, ipo_per))
+    st.stop()
 if q and not members:
     st.warning("No stock matches “%s”." % q)
     st.stop()
 if q:
-    st.caption("🔍 %d of %d stocks match “%s”: %s" % (len(members), len(an.stocks_in(tag, sec)), q, ", ".join(members)))
+    st.caption("🔍 %d of %d stocks match “%s”: %s" % (len(members), len(group), q, ", ".join(members)))
 
 curves, starts, trades_by, left_out = {}, {}, {}, {}
 with st.spinner("Building every stock's first %d months..." % MAX_MONTHS):
@@ -184,7 +194,7 @@ for m in range(1, AXIS_MONTHS + 1):
     fig.add_vline(x=m, line_color="#ddd", line_width=1)
 fig.update_layout(height=600, margin=dict(l=10, r=10, t=40, b=10),
                   title=dict(text="%s · Daily RRG on %s · %g%% stop-loss · %d stocks"
-                             % (an.view_name(tag, sec), basis_txt, stop_loss, len(curves)), font=dict(size=15)),
+                             % (an.view_name(tag, sec, ipo_per), basis_txt, stop_loss, len(curves)), font=dict(size=15)),
                   xaxis=dict(title="Months since the RRG chart started (month 0)", range=[0, AXIS_MONTHS], dtick=1),
                   yaxis=dict(title="Cumulative profit %", ticksuffix="%"), hovermode="closest",
                   plot_bgcolor="#fcfcfb", paper_bgcolor="#fcfcfb", legend=dict(font=dict(size=10)))
@@ -247,7 +257,7 @@ if vals_all:                                    # early days are noisy (a 1-day 
     yr = [min(lo, 0) - pad, max(hi, 0) + pad]
 dfig.update_layout(height=560, margin=dict(l=10, r=10, t=40, b=10), hovermode="closest",
                    title=dict(text="%s · Daily RRG on %s · %g%% stop-loss · %d stocks — average daily profit %%"
-                              % (an.view_name(tag, sec), basis_txt, stop_loss, len(curves)), font=dict(size=15)),
+                              % (an.view_name(tag, sec, ipo_per), basis_txt, stop_loss, len(curves)), font=dict(size=15)),
                    xaxis=dict(title="Months since the RRG chart started (month 0)", range=[0, AXIS_MONTHS], dtick=1),
                    yaxis=dict(title="Average daily profit % (per day held)", ticksuffix="%", range=yr),
                    legend=dict(font=dict(size=11)), plot_bgcolor="#fcfcfb", paper_bgcolor="#fcfcfb")
@@ -289,7 +299,8 @@ for s, df in curves.items():
     profits = [t["ret"] for t in closed]
     days = [int((t["sell"] - t["buy"]).days) for t in closed]
     rows.append({
-        "Ticker": s, "Stock": INFO[s]["name"], "Sector": an.sector(s), "RRG from": starts[s].strftime("%d %b %Y"),
+        "Ticker": s, "Stock": INFO[s]["name"], "Sector": an.sector(s), "IPO launch period": an.launch_period(s),
+        "RRG from": starts[s].strftime("%d %b %Y"),
         "Number of trades": len(closed),
         "Profit % per trade": ", ".join("%.2f" % p for p in profits) or "—",
         "Days held per trade": ", ".join(str(d) for d in days) or "—",
@@ -425,7 +436,7 @@ pad = (hi - lo) * 0.06 or 1
 lf.update_layout(height=650, margin=dict(l=70, r=20, t=60, b=10), hovermode="closest",
                  title=dict(text="%s · %d stocks · first 12 months  —  at every exit point: <span style='color:%s'>"
                                  "<b>10%% stop-loss on the left</b></span>, <span style='color:%s'><b>15%% stop-loss on the "
-                                 "right</b></span>" % (an.view_name(tag, sec), len(curves),
+                                 "right</b></span>" % (an.view_name(tag, sec, ipo_per), len(curves),
                                                        SL_COL[10.0], SL_COL[15.0]), font=dict(size=14)),
                  xaxis=dict(title="Profit exit point — take-profit (%)", range=[2, TAKE_PROFITS[-1] + 3],
                             tickvals=TAKE_PROFITS, ticktext=["<b>%d%%</b>" % x for x in TAKE_PROFITS], showgrid=False),
@@ -474,7 +485,7 @@ for k, sl in enumerate(core.STOP_LOSS_OPTIONS):        # lane titles on the left
                  line=dict(color=SL_COL.get(sl, "#555"), width=2.5), fillcolor="rgba(0,0,0,0)", layer="above")
 hm.update_layout(height=140 + 24 * n_rows, margin=dict(l=170, r=10, t=110, b=10),
                  title=dict(text="%s · %d stocks · Daily RRG on %s · first 12 months  —  top: %g%% stop-loss · bottom: "
-                                 "%g%% stop-loss" % (an.view_name(tag, sec), len(curves), basis_txt,
+                                 "%g%% stop-loss" % (an.view_name(tag, sec, ipo_per), len(curves), basis_txt,
                                                      core.STOP_LOSS_OPTIONS[0], core.STOP_LOSS_OPTIONS[-1]),
                             font=dict(size=14), y=0.995, yanchor="top"),
                  xaxis=dict(side="top", tickfont=dict(size=13)),

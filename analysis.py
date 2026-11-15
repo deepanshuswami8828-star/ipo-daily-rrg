@@ -141,21 +141,63 @@ def sector_options(tag="All"):
     return [ALL_SECTORS] + [sec for sec, _ in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))]
 
 
-def stocks_in(tag="All", sec=ALL_SECTORS):
-    """Symbols in a tag (or All) and a sector (or All sectors)."""
+ALL_PERIODS = "All launch periods"
+# IPO launch period groups, newest first: (name, from date incl., to date excl.), by the listing date in the stock list
+PERIODS = [
+    ("Apr 2026 onwards", pd.Timestamp("2026-04-01"), None),
+    ("Oct 2025 – Mar 2026", pd.Timestamp("2025-10-01"), pd.Timestamp("2026-04-01")),
+    ("Apr 2025 – Sep 2025", pd.Timestamp("2025-04-01"), pd.Timestamp("2025-10-01")),
+    ("Before Apr 2025", None, pd.Timestamp("2025-04-01")),
+]
+
+
+def launch_period(sym):
+    """IPO launch period group of a stock, from its listing date (SKF India: demerger listing date)."""
+    from rrg_core import INFO
+    d = INFO[sym]["listed"]
+    for name, lo, hi in PERIODS:
+        if (lo is None or d >= lo) and (hi is None or d < hi):
+            return name
+    return "—"
+
+
+def period_options():
+    """Choices for the IPO launch period dropdown: All launch periods, then the groups, newest first."""
+    return [ALL_PERIODS] + [name for name, _, _ in PERIODS]
+
+
+def _all(value, everything):
+    return value in (None, everything)
+
+
+def stocks_in(tag="All", sec=ALL_SECTORS, per=ALL_PERIODS):
+    """Symbols in a tag (or All), a sector (or All sectors) and an IPO launch period (or All launch periods)."""
     from rrg_core import stocks_for_tag
-    return [s for s in stocks_for_tag(tag) if sec in (None, ALL_SECTORS) or sector(s) == sec]
+    return [s for s in stocks_for_tag(tag) if (_all(sec, ALL_SECTORS) or sector(s) == sec)
+            and (_all(per, ALL_PERIODS) or launch_period(s) == per)]
 
 
-def sector_label(sec, tag="All"):
-    n = len(stocks_in(tag, sec))
-    return "%s (%d stock%s)" % (sec, n, "" if n == 1 else "s")
+def _count(name, n):
+    return "%s (%d stock%s)" % (name, n, "" if n == 1 else "s")
 
 
-def view_name(tag="All", sec=ALL_SECTORS):
-    """Display name of a tag + sector choice, e.g. 'All stocks', 'Top 20 IPO 2026 · Industrials'."""
-    name = "All stocks" if tag == "All" else tag
-    return name if sec in (None, ALL_SECTORS) else ("%s · %s" % (name, sec) if tag != "All" else sec)
+def sector_label(sec, tag="All", per=ALL_PERIODS):
+    return _count(sec, len(stocks_in(tag, sec, per)))
+
+
+def period_label(per, tag="All", sec=ALL_SECTORS):
+    return _count(per, len(stocks_in(tag, sec, per)))
+
+
+def view_name(tag="All", sec=ALL_SECTORS, per=ALL_PERIODS):
+    """Display name of a tag + sector + launch period choice, e.g. 'All stocks', 'Top 20 IPO 2026 · Industrials',
+    'Industrials · IPO Apr 2026 onwards'."""
+    parts = [] if tag == "All" else [tag]
+    if not _all(sec, ALL_SECTORS):
+        parts.append(sec)
+    if not _all(per, ALL_PERIODS):
+        parts.append("IPO " + per)
+    return " · ".join(parts) or "All stocks"
 
 
 def search_stocks(symbols, query):

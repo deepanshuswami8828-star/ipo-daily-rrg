@@ -758,22 +758,25 @@ elif page == "Strategy":
 # ================================================================ ALL STOCKS PAGE
 elif page == "All stocks":
     st.markdown("#### All Stocks Comparison (Daily RRG on %s) against %s" % (BASIS, BENCH))
-    c1, c2, c3 = st.columns([1, 1.4, 1.2])
+    c1, c2, c4, c3 = st.columns([1, 1.4, 1.2, 1.2])
     tag = c1.selectbox("Show tag", ["All"] + core.TAGS, format_func=lambda t: "%s (%d)" % (t, len(core.stocks_for_tag(t))))
     tag_syms = core.stocks_for_tag(tag)
     sectors = sorted({an.sector(s) for s in tag_syms})
     pick = c2.multiselect("Filter by sector", sectors, default=sectors)
+    periods = [p for p in an.period_options()[1:] if any(an.launch_period(s) == p for s in tag_syms)]
+    pick_per = c4.multiselect("IPO launch period", periods, default=periods,
+                              format_func=lambda p: "%s (%d)" % (p, sum(an.launch_period(s) == p for s in tag_syms)))
     q_all = c3.text_input("🔍 Search", key="search_all", placeholder="name, ticker, sector, tag")
-    syms = an.search_stocks([s for s in tag_syms if an.sector(s) in pick], q_all)
-    if q_all and not syms:
-        st.warning("No stock matches “%s”." % q_all)
+    syms = an.search_stocks([s for s in tag_syms if an.sector(s) in pick and an.launch_period(s) in pick_per], q_all)
+    if not syms:
+        st.warning("No stock matches “%s”." % q_all if q_all else "No stock in the chosen sectors and launch periods.")
         st.stop()
     rows = []
     for s in syms:
         g = safe_load(s, token, sma)
         name = INFO[s]["name"]
         base = {"Stock": name, "Symbol": s, "Tags": core.tag_text(s), "Sector": an.sector(s),
-                "Listed": INFO[s]["listed"].strftime("%d %b %Y")}
+                "Listed": INFO[s]["listed"].strftime("%d %b %Y"), "IPO launch period": an.launch_period(s)}
         if g is None:
             rows.append(dict(base, Note="NSE SME stock — add NSE CSV files" if INFO[s]["source"] == "nse_csv"
                              else "No data"))

@@ -90,19 +90,28 @@ stop_loss = c4.radio("Stop-loss", core.STOP_LOSS_OPTIONS, horizontal=True, key="
 cost = c5.number_input("Charges / side (%)", 0.0, 1.0, core.COST_PCT, 0.01, key="tags_cost")
 since = pd.Timestamp(c6.date_input("From", value=pd.Timestamp(FROM_DEFAULT).date(), key="tags_from"))
 basis_txt = "SMA %d price" % sma if sma else "daily close"
-k1, k2 = st.columns([1, 2])
+k1, k3, k2 = st.columns([1, 1, 1.6])
+per_now = st.session_state.get("tags_period", an.ALL_PERIODS)
 sec = k1.selectbox("Sector", an.sector_options(tag), key="tags_sector",
-                   format_func=lambda x: an.sector_label(x, tag))
-tag_name = an.view_name(tag, sec)
+                   format_func=lambda x: an.sector_label(x, tag, per_now))
+ipo_per = k3.selectbox("IPO launch period", an.period_options(), key="tags_period",
+                   format_func=lambda x: an.period_label(x, tag, sec),
+                   help="Groups by listing date: Apr 2026 onwards · Oct 2025 – Mar 2026 · Apr 2025 – Sep 2025 · "
+                        "before Apr 2025. Counts are within the chosen tag and sector.")
+tag_name = an.view_name(tag, sec, ipo_per)
 q = k2.text_input("🔍 Search stock", key="tags_search", placeholder="name, ticker, sector, city or tag — leave empty for the whole tag",
                   help="Every word must match, e.g. 'kaynes', 'jewel', 'technology'. Averages and charts below then use only "
                        "the matching stocks.")
-members = an.search_stocks(an.stocks_in(tag, sec), q)
+group = an.stocks_in(tag, sec, ipo_per)
+members = an.search_stocks(group, q)
+if not group:
+    st.warning("No stock in %s — pick another sector or launch period." % tag_name)
+    st.stop()
 if q and not members:
     st.warning("No stock in %s matches “%s”." % (tag_name, q))
     st.stop()
 if q:
-    st.caption("🔍 %d of %d stocks match “%s”: %s" % (len(members), len(an.stocks_in(tag, sec)), q, ", ".join(members)))
+    st.caption("🔍 %d of %d stocks match “%s”: %s" % (len(members), len(group), q, ", ".join(members)))
     tag_name = "%s · search “%s”" % (tag_name, q)
 
 st.markdown("### %s · %s to now" % (tag_name, since.strftime("%d %b %Y")))
@@ -126,7 +135,8 @@ k3.metric("Average daily profit % (simple)", "%.4f%%" % rep["avg_daily"] if rep[
 k4.metric("Avg days held per trade", "%.1f" % rep["avg_days"] if rep["avg_days"] is not None else "—")
 
 table = pd.DataFrame([{
-    "Ticker": s, "Stock": INFO[s]["name"], "Sector": an.sector(s), "RRG from": r["first"].strftime("%d %b %Y"),
+    "Ticker": s, "Stock": INFO[s]["name"], "Sector": an.sector(s), "IPO launch period": an.launch_period(s),
+    "RRG from": r["first"].strftime("%d %b %Y"),
     "Number of trades": len(r["trades"]),
     "Profit % per trade": ", ".join("%.2f" % p for p in r["profits"]) or "—",
     "Days held per trade": ", ".join(str(d) for d in r["days"]) or "—",
