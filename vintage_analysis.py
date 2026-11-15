@@ -99,19 +99,17 @@ m4.metric("Avg daily profit %", "%+.4f%%" % np.mean(tag_daily) if tag_daily else
           help="As on the Tags analysis page: each stock's closed trades in the first 6 months, sum of profit % ÷ "
                "sum of calendar days held in those trades; simple average over stocks with a closed trade.")
 
-o1, o2, o3 = st.columns(3)
+o1, o3 = st.columns(2)
 show_bh = o1.toggle("Also show buy & hold average", value=True, key="vin_bh")
-show_each = o2.toggle("Show each stock's line", value=True, key="vin_each")
 show_daily = o3.toggle("Show average daily profit % line", value=False, key="vin_daily",
                        help="The same line (no take-profit) is in its own chart below, with one line per profit exit point.")
 fig = go.Figure()
-if show_each:
-    for i, (s, df) in enumerate(curves.items()):
-        fig.add_trace(go.Scatter(x=df["month"], y=df["strategy"], mode="lines", name=s, opacity=0.45,
-                                 line=dict(width=1.3, color=PAL[i % len(PAL)]),
-                                 hovertemplate="<b>%s</b> · %%{customdata}<br>month %%{x:.1f}<br>strategy %%{y:+.1f}%%"
-                                               "<extra></extra>" % s,
-                                 customdata=df.index.strftime("%d %b %Y")))
+for i, (s, df) in enumerate(curves.items()):                # every stock's line (hide one by clicking it in the legend)
+    fig.add_trace(go.Scatter(x=df["month"], y=df["strategy"], mode="lines", name=s, opacity=0.45,
+                             line=dict(width=1.3, color=PAL[i % len(PAL)]),
+                             hovertemplate="<b>%s</b> · %%{customdata}<br>month %%{x:.1f}<br>strategy %%{y:+.1f}%%"
+                                           "<extra></extra>" % s,
+                             customdata=df.index.strftime("%d %b %Y")))
 fig.add_trace(go.Scatter(x=avg["month"], y=avg["avg"], mode="lines", name="Average strategy profit",
                          line=dict(width=4, color="black"), customdata=avg["n"],
                          hovertemplate="<b>Average strategy</b><br>month %{x:.1f}<br>%{y:+.2f}%<br>%{customdata} stocks"
