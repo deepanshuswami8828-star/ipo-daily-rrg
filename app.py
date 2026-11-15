@@ -12,9 +12,24 @@ A Data Status & Validation panel sits at the top of every page.
 
 Run:  streamlit run app.py      (or double-click "Start IPO RRG App.bat")
 """
+import importlib
+import os
+import sys
 import warnings
 
 warnings.filterwarnings("ignore")
+
+# Streamlit Cloud keeps imported modules in memory between deploys, so after a new deploy an old copy of
+# rrg_core could run with a new results.py (AttributeError). Reload our own modules once whenever their files
+# change, in dependency order, before anything is imported from them.
+_ROOT = os.path.dirname(os.path.abspath(__file__))
+_OWN = ("rrg_core", "analysis", "compute", "results")
+_CODE = tuple(os.path.getmtime(os.path.join(_ROOT, m + ".py")) for m in _OWN)
+if getattr(sys, "_ipo_rrg_code", None) != _CODE:
+    for _m in _OWN:
+        if _m in sys.modules:
+            importlib.reload(sys.modules[_m])
+    sys._ipo_rrg_code = _CODE
 
 import pandas as pd
 import plotly.graph_objects as go

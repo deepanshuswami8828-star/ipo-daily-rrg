@@ -47,8 +47,11 @@ def bundle():
     b = _LOADED["bundle"]
     if not b:
         return {}
-    meta = b.get("meta", {})
-    if meta.get("fingerprint") != fingerprint() or meta.get("data_through") != core.data_through():
+    try:                                   # any problem -> no saved results; the pages calculate live instead
+        meta = b.get("meta", {})
+        if meta.get("fingerprint") != fingerprint() or meta.get("data_through") != core.data_through():
+            return {}
+    except Exception:
         return {}
     return b
 
