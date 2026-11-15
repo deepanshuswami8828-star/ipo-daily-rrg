@@ -41,7 +41,7 @@ def saved_ok(sma, cost):
 st.title("📅 Vintage chart — month 0 to 6 of the RRG")
 st.caption("Each stock on its own clock: **month 0 = the day its Daily RRG chart starts** (first RRG session after the "
            "warm-up), up to month 6. Line = the Daily RRG strategy's cumulative profit %, marked to market every day.")
-token = st.session_state.get("token", 0)
+token = (st.session_state.get("token", 0), RES.fingerprint())   # cache key: data refresh + code version
 _m = RES.meta()
 st.caption(("⚡ Using results saved on %s (data up to %s) — settings other than daily close / SMA %d with %.2f%% "
             "charges are calculated live." % (_m["built_at"], _m["data_through"].strftime("%d %b %Y"), core.SMA_DEFAULT,

@@ -19,16 +19,20 @@ import warnings
 
 warnings.filterwarnings("ignore")
 
-# Streamlit Cloud keeps imported modules in memory between deploys, so after a new deploy an old copy of
-# rrg_core could run with a new results.py (AttributeError). Reload our own modules once whenever their files
-# change, in dependency order, before anything is imported from them.
+# Streamlit Cloud keeps imported modules AND st.cache_data results in memory between deploys, so after a new
+# deploy an old copy of rrg_core could run with a new results.py (AttributeError), or a page could get a cached
+# result built by the old code (KeyError: a new column missing). Whenever any of the app's .py files changes:
+# reload our own modules (in dependency order, before anything is imported from them) and clear the data cache.
 _ROOT = os.path.dirname(os.path.abspath(__file__))
 _OWN = ("rrg_core", "analysis", "compute", "results")
-_CODE = tuple(os.path.getmtime(os.path.join(_ROOT, m + ".py")) for m in _OWN)
+_FILES = sorted(f for f in os.listdir(_ROOT) if f.endswith(".py"))
+_CODE = tuple((f, os.path.getmtime(os.path.join(_ROOT, f)), os.path.getsize(os.path.join(_ROOT, f))) for f in _FILES)
 if getattr(sys, "_ipo_rrg_code", None) != _CODE:
     for _m in _OWN:
         if _m in sys.modules:
             importlib.reload(sys.modules[_m])
+    import streamlit as _st
+    _st.cache_data.clear()
     sys._ipo_rrg_code = _CODE
 
 import pandas as pd

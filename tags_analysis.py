@@ -13,6 +13,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 import analysis as an
+import results
 import rrg_core as core
 from rrg_core import INFO
 
@@ -77,7 +78,7 @@ def tag_report(tag, sma, stop_loss, cost, token, since=None):
 st.title("🏷️ Tags analysis")
 st.caption("Profitability of Strategy 2 · Version 3 rules on the **Daily** RRG for every stock in a tag, "
            "from each IPO's first RRG session.")
-token = st.session_state.get("token", 0)
+token = (st.session_state.get("token", 0), results.fingerprint())   # cache key: data refresh + code version
 
 c1, c2, c3, c4, c5, c6 = st.columns([2.2, 1.6, 0.9, 1.2, 1, 1.2])
 tag = c1.selectbox("Tag", an.tag_options(), key="tags_page_tag", format_func=an.tag_label)
