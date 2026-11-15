@@ -171,7 +171,8 @@ st.plotly_chart(fig, width="stretch", key="vin_chart")
 st.caption("Each line = simple average of the strategy's cumulative profit % over the stocks that have reached that "
            "month (hover for how many). **Black = RRG exit only (no take-profit)**; coloured = the same strategy that also "
            "sells when the daily close is up 5%…30% (after a take-profit it buys again only once the Daily RRG goes down "
-           "and comes back up). Blue dashed = buy & hold. A stock whose RRG started less than 6 months ago stops at its "
+           "and comes back up; a buy right after a 1-2 session dip back into the same quadrant is skipped as a false "
+           "trigger). Blue dashed = buy & hold. A stock whose RRG started less than 6 months ago stops at its "
            "latest session, so later months average fewer stocks. Click a name in the legend to hide that line.")
 pm_rows = []
 for tp in main_exits:

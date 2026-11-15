@@ -393,14 +393,38 @@ def _fill(o, c):
     return (o + c) / 2.0 if o == o else c
 
 
-def run_strategy(rrg, stop_loss_pct=STOP_LOSS_PCT, cost_pct=COST_PCT, take_profit_pct=None):
+# False-trigger re-entries skipped (from 15 Nov 2026, as in the help folder's Strategy 2 v3, here on the DAILY RRG):
+# after a Daily RRG exit, the buy that comes right back when the Daily RRG dipped for only 1 or 2 sessions and
+# returned to the SAME quadrant is not taken:
+#   Leading -> Weakening (1-2 sessions) -> Leading,   Improving -> Lagging (1-2 sessions) -> Improving
+# The sell still happens; the next buy waits for the Daily RRG to go down and come back up again.
+DIP_PATTERNS = {("Leading", "Weakening"), ("Improving", "Lagging")}
+
+
+def false_dip_reentry(quads, dip, i):
+    """True when a buy signal on day i follows one of the DIP_PATTERNS. dip = (day e of the exit signal, quadrant
+    before it, quadrant it went into). Back in the old quadrant on day e+1 (1 session down) or on day e+2 after
+    e+1 was still in the dip or already back (2 sessions down)."""
+    if dip is None:
+        return False
+    e, before, into = dip
+    if (before, into) not in DIP_PATTERNS or quads[i] != before:
+        return False
+    return i == e + 1 or (i == e + 2 and quads[e + 1] in (before, into))
+
+
+def run_strategy(rrg, stop_loss_pct=STOP_LOSS_PCT, cost_pct=COST_PCT, take_profit_pct=None,
+                 skip_dip_reentry=True, skipped=None):
     """-> (trades, pending buy signal, pending sell signal). Pending = signalled on the last
     day, to be executed on the next trading day.
     take_profit_pct (optional): any day's close >= buy price + x% sells that day at that close
-    (profit booked); like a stop-loss, it buys again only after a down-and-up of the Daily RRG."""
+    (profit booked); like a stop-loss, it buys again only after a down-and-up of the Daily RRG.
+    skip_dip_reentry: skip the false-trigger buy right after a 1-2 session dip (DIP_PATTERNS).
+    skipped: optional list that receives every skipped buy signal."""
     dates, q = rrg.index, rrg["Quadrant"].to_numpy()
     c, o = rrg["Close"].to_numpy(), rrg["Open"].to_numpy()
     trades, pos, armed, pending, pending_exit = [], None, True, None, None
+    dip = None                   # (day index of the last Daily RRG exit signal, quadrant before, quadrant into)
     for i, d in enumerate(dates):
         if pending_exit is not None:                     # RRG exit: sell today
             trades.append(dict(pos, sell=d, sell_px=_fill(o[i], c[i]), open=False, **pending_exit))
@@ -408,7 +432,7 @@ def run_strategy(rrg, stop_loss_pct=STOP_LOSS_PCT, cost_pct=COST_PCT, take_profi
             continue
         if pending is not None:                          # entry: buy today, exits checked from tomorrow
             pos = dict(pending, buy=d, buy_px=_fill(o[i], c[i]))
-            pending = None
+            pending, dip = None, None
             continue
         if pos is not None:
             stop_px = pos["buy_px"] * (1 - stop_loss_pct / 100.0)
@@ -429,11 +453,20 @@ def run_strategy(rrg, stop_loss_pct=STOP_LOSS_PCT, cost_pct=COST_PCT, take_profi
             elif q[i] in DOWN:
                 pending_exit = dict(exit_signal=d, exit_into=q[i], stop=False, stop_px=stop_px,
                                     exit_reason="Daily → %s" % q[i])
+                dip = (i, q[i - 1] if i else "", q[i])
             continue
         if q[i] in DOWN:
             armed = True
         elif armed and q[i] in UP:
+            if skip_dip_reentry and false_dip_reentry(q, dip, i):
+                if skipped is not None:
+                    e, before, into = dip
+                    skipped.append(dict(date=d, quadrant=q[i], exit_signal=dates[e], dip_into=into,
+                                        sessions_down=1 if (i == e + 1 or q[e + 1] == before) else 2))
+                armed, dip = False, None      # false trigger: no buy; wait for a new down-and-up
+                continue
             pending = dict(signal=d, into=q[i], frm=q[i - 1] if i else "")
+            dip = None
     if pos is not None:
         trades.append(dict(pos, sell=None, sell_px=c[-1], open=True, exit_signal=None, exit_into=None,
                            stop=False, stop_px=pos["buy_px"] * (1 - stop_loss_pct / 100.0),
@@ -448,7 +481,8 @@ def run_strategy(rrg, stop_loss_pct=STOP_LOSS_PCT, cost_pct=COST_PCT, take_profi
     return trades, pending, pending_exit
 
 
-def replay_realistic(rrg, px, tp_pct=10.0, sl_pct=10.0, cost_pct=COST_PCT, amount=100000.0, end=None):
+def replay_realistic(rrg, px, tp_pct=10.0, sl_pct=10.0, cost_pct=COST_PCT, amount=100000.0, end=None,
+                     skip_dip_reentry=True):
     """Replay the Daily RRG strategy with orders a trader could actually place, on daily OHLCV `px`.
 
     Entry  : the day after the RRG turns Improving/Leading, market buy at that day's OPEN (whole shares).
@@ -459,7 +493,8 @@ def replay_realistic(rrg, px, tp_pct=10.0, sl_pct=10.0, cost_pct=COST_PCT, amoun
              if one day's range contains BOTH levels the order is unknown from daily data, so the
              stop-loss is assumed first (conservative);
              RRG exit: the day after Weakening/Lagging, market sell at that day's OPEN.
-    Re-entry after a stop-loss / take-profit only after the Daily RRG goes down and comes back up.
+    Re-entry after a stop-loss / take-profit only after the Daily RRG goes down and comes back up, and the
+    false-trigger buy after a 1-2 session dip back into the same quadrant is skipped (DIP_PATTERNS).
     Every trade carries `flags`: practical barriers seen on its entry / exit days."""
     q = rrg["Quadrant"]
     px = px[px.index.isin(rrg.index)]
@@ -467,6 +502,8 @@ def replay_realistic(rrg, px, tp_pct=10.0, sl_pct=10.0, cost_pct=COST_PCT, amoun
     prev_close = px["Close"].shift(1)
     k = cost_pct / 100.0
     trades, pos, armed, want_buy, want_sell = [], None, True, None, None
+    qa = [q.get(d) for d in days]
+    dip = None                       # last Daily RRG exit signal, for the false-trigger skip (DIP_PATTERNS)
 
     def day_flags(d, side):
         f = []
@@ -495,7 +532,7 @@ def replay_realistic(rrg, px, tp_pct=10.0, sl_pct=10.0, cost_pct=COST_PCT, amoun
                 want_buy = None
             else:
                 pos = dict(signal=want_buy, buy=d, buy_px=o, shares=sh, flags=day_flags(d, "Buy"))
-                want_buy = None
+                want_buy, dip = None, None
         if pos is not None and pos.get("sell") is None:
             stop, target = pos["buy_px"] * (1 - sl_pct / 100.0), pos["buy_px"] * (1 + tp_pct / 100.0)
             gap_open = d != pos["buy"]                              # on the entry day we bought at the open
@@ -521,12 +558,17 @@ def replay_realistic(rrg, px, tp_pct=10.0, sl_pct=10.0, cost_pct=COST_PCT, amoun
                 continue
             if q.get(d) in DOWN:
                 want_sell = q.get(d)
+                dip = (i, qa[i - 1] if i else None, qa[i])
             continue
         if pos is None and want_buy is None:
             if q.get(d) in DOWN:
                 armed = True
             elif armed and q.get(d) in UP and i + 1 < len(days) and (end is None or days[i + 1] <= end):
+                if skip_dip_reentry and false_dip_reentry(qa, dip, i):
+                    armed, dip = False, None      # false trigger: wait for a new down-and-up
+                    continue
                 want_buy = d
+                dip = None
     if pos is not None:
         pos.update(sell=None, sell_px=float(px["Close"].iloc[-1]), exit="Open position (marked at last close)")
         trades.append(pos)

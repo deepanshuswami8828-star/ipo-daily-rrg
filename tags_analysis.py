@@ -105,7 +105,7 @@ st.markdown("### Tag: %s · %s to %s" % (tag_name, since.strftime("%d %b %Y"), "
 st.caption("Trades bought on or after **%s** (the RRG itself uses the whole history for its warm-up). "
            % since.strftime("%d %b %Y") +
            "Daily RRG built on **%s**, **%g%%** stop-loss. Buy the day after the Daily RRG turns Improving/Leading, "
-           "sell the day after it turns Weakening/Lagging, both at (open + close) ÷ 2; stop-loss sells at that day's close. "
+           "sell the day after it turns Weakening/Lagging, both at (open + close) ÷ 2; stop-loss sells at that day's close; a buy right after a 1-2 session dip back into the same quadrant is skipped (false trigger). "
            "Each trade assumes ₹%s invested (whole shares), charges %g%% per side. Only closed trades count; "
            "days held are calendar days." % (basis_txt, stop_loss, format(TRADE_AMOUNT, ",.0f"), cost))
 

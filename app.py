@@ -507,7 +507,9 @@ NSE prices are as traded (not adjusted for splits or bonuses); the validation pa
     st.stop()
 if got is not None:
     al, rrg, warm, note, fetched = got
-    trades, pend, pend_x = core.run_strategy(rrg, stop_loss, cost) if not rrg.empty else ([], None, None)
+    skipped_buys = []
+    trades, pend, pend_x = (core.run_strategy(rrg, stop_loss, cost, skipped=skipped_buys) if not rrg.empty
+                            else ([], None, None))
 
 
 def issue_text(i):
@@ -630,7 +632,9 @@ elif page == "Strategy":
         "<div style='background:#f1f8e9;padding:10px 14px;border-radius:6px'><b style='color:#2e7d32'>🟢 Kharidne ka "
         "Niyam:</b><div style='font-size:0.9rem;margin-top:4px'>Jis din Daily RRG Leading ya Improving ho, agle "
         "trading din (open + close) ÷ 2 par buy. Stop-loss ke baad: Daily pehle Weakening/Lagging me jaaye, phir upar "
-        "aaye tabhi dobara buy.</div></div>"
+        "aaye tabhi dobara buy.<br><b>False trigger skip:</b> Daily exit ke baad agar Daily sirf 1-2 din neeche jaakar "
+        "usi quadrant me wapas aaye (Leading → Weakening → Leading, ya Improving → Lagging → Improving), to wo buy nahi "
+        "lete; agla buy tab jab Daily phir neeche jaakar upar aaye.</div></div>"
         "<div style='background:#fbe9e7;padding:10px 14px;border-radius:6px'><b style='color:#c62828'>🔴 Bechne ka "
         "Niyam:</b><div style='font-size:0.9rem;margin-top:4px'>Jis din Daily RRG Weakening ya Lagging ho, agle din "
         "(open + close) ÷ 2 par sell. Ya kisi bhi din close ≤ buy price ka %g%% to usi din close par sell.</div></div>"
@@ -708,12 +712,23 @@ elif page == "Strategy":
     else:
         status_box(INK_3, "WAIT — all %s is in cash" % inr(cash),
                    ["Waiting for the Daily RRG to move into Improving or Leading%s."
-                    % (" (after a stop-loss it must first go down and come back up)" if book and book[-1].get("stop") else ""),
+                    % (" (after a stop-loss it must first go down and come back up)" if book and book[-1].get("stop")
+                       else " (the last buy signal on %s was a false trigger and was skipped, so it must first go down "
+                            "and come back up)" % skipped_buys[-1]["date"].strftime("%d %b %Y")
+                       if skipped_buys and (not book or skipped_buys[-1]["date"] > book[-1]["sell"]) else ""),
                     state])
 
     st.plotly_chart(strategy_figure(al, rrg, book, value, bh_value, info["issue"]), width="stretch", theme=None,
                     config={"displaylogo": False})
 
+    if skipped_buys:
+        with st.expander("⏭️ False triggers skipped (%d) — buy signals right after a 1-2 session dip" % len(skipped_buys)):
+            st.dataframe(pd.DataFrame([{
+                "Skipped buy signal": x["date"].strftime("%a %d %b %Y"), "Daily back in": x["quadrant"],
+                "Exit signal": x["exit_signal"].strftime("%d %b %Y"), "Dipped into": x["dip_into"],
+                "Sessions down": x["sessions_down"]} for x in skipped_buys]), hide_index=True, width="stretch")
+            st.caption("After a Daily RRG exit, the Daily went down for only 1-2 sessions and came back to the same "
+                       "quadrant, so the buy was not taken; the next buy waited for a new down-and-up.")
     st.subheader("Every trade in rupees, oldest first")
     if book:
         table = pd.DataFrame([{
@@ -822,6 +837,10 @@ else:
   average of its open and close.
 - **Stop-loss:** any day's close at or below the buy price minus the stop-loss % (10% or 15%, chosen in the sidebar) sells that day at that
   close. After a stop-loss it buys again only after the Daily RRG has gone into Weakening/Lagging and come back up.
+- **False-trigger skip (from 15 Nov 2026):** after a Daily RRG exit, if the Daily RRG goes down for only **1 or 2
+  sessions** and comes back to the **same** quadrant, that buy is not taken — **Leading → Weakening (1-2 days) →
+  Leading** or **Improving → Lagging (1-2 days) → Improving**. The sell still happens; the next buy waits for the Daily
+  RRG to go down and come back up again (as in the help folder's Strategy 2 v3, here on the Daily RRG).
 - One position at a time, whole shares, charges per side as set in the sidebar.
 
 #### Data checks (same as the help folder)
