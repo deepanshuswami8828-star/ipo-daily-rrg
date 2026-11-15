@@ -90,7 +90,9 @@ def build(refresh=False, log=print):
         for sma in SMAS:
             for sl in core.STOP_LOSS_OPTIONS:
                 for tp in cp.EXITS:
-                    items[("tp", s, sma, sl, tp)] = cp.tp_stock(s, sma, sl, cost, tp)
+                    v = cp.vintage(s, sma, sl, cost, tp)
+                    items[("tp", s, sma, sl, tp)] = cp.tp_summary(v)
+                    items[("daily", s, sma, sl, tp)] = cp.daily_series(v)
             items[("rule", s, sma)] = cp.rule_check_stock(s, sma, cost)
             items[("replay", s, sma)] = cp.replay(s, sma, r["tp"], r["sl"], cost, r["amount"], r["only6"])
         if i % 10 == 0 or i == len(symbols):

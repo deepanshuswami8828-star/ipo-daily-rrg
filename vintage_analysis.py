@@ -102,7 +102,8 @@ m4.metric("Avg daily profit %", "%+.4f%%" % np.mean(tag_daily) if tag_daily else
 o1, o2, o3 = st.columns(3)
 show_bh = o1.toggle("Also show buy & hold average", value=True, key="vin_bh")
 show_each = o2.toggle("Show each stock's line", value=True, key="vin_each")
-show_daily = o3.toggle("Show average daily profit % line", value=True, key="vin_daily")
+show_daily = o3.toggle("Show average daily profit % line", value=False, key="vin_daily",
+                       help="The same line (no take-profit) is in its own chart below, with one line per profit exit point.")
 fig = go.Figure()
 if show_each:
     for i, (s, df) in enumerate(curves.items()):
@@ -142,6 +143,84 @@ st.plotly_chart(fig, width="stretch", key="vin_chart")
 st.caption("Black line = simple average of the strategy's profit % over the stocks that have reached that month "
            "(hover for how many). A stock whose RRG started less than 6 months ago stops at its latest session, so "
            "later months average fewer stocks. Click a name in the legend to hide it.")
+
+# ---- vintage view of the average daily profit %, one line per profit exit point ---------------------
+st.markdown("### Average daily profit % — vintage view, one line per profit exit point")
+st.caption("Same stocks and month-0 clock as above. For every stock, **daily profit %%** on a given day = sum of profit %% "
+           "of the trades closed so far (bought and sold after month 0) ÷ sum of calendar days held in them — the Tags "
+           "analysis method. The line is the average over the stocks that have a closed trade by then. One line per profit "
+           "exit point: **black = RRG exit only (no take-profit)**; coloured = sell when the daily close is up x%%. "
+           "Daily RRG on %s · %g%% stop-loss (change it at the top)." % (basis_txt, stop_loss))
+EXIT_COL = {None: "#111111", 5: "#9e0142", 7: "#d53e4f", 10: "#f46d43", 12: "#fdae61", 15: "#e6c229",
+            17: "#abdda4", 20: "#66c2a5", 25: "#3288bd", 30: "#5e4fa2"}
+EXIT_LBL = {tp: ("RRG exit (no take-profit)" if tp is None else "Take-profit %d%%" % tp) for tp in cp.EXITS}
+pick_exits = st.multiselect("Profit exit points to show", cp.EXITS, default=cp.EXITS, key="vin_daily_exits",
+                            format_func=EXIT_LBL.get)
+
+
+def daily_curves(tp):
+    """{symbol: DataFrame[day, daily]} for the stocks shown, at this exit point (saved results when available)."""
+    out = {}
+    for s in curves:
+        if tp is None:
+            out[s] = curves[s][["day", "daily"]]
+            continue
+        got = RES.get(("daily", s, sma, stop_loss, tp), "missing") if saved_ok(sma, cost) else "missing"
+        if got == "missing":
+            v = vintage(s, sma, stop_loss, cost, token, tp)
+            got = cp.daily_series(v)
+        if got is not None:
+            out[s] = pd.DataFrame({"day": got[0].astype(int), "daily": got[1].astype(float)})
+    return out
+
+
+with st.spinner("Building the daily profit % lines..."):
+    dlines = {tp: average_line(daily_curves(tp), "daily") for tp in pick_exits}
+dfig = go.Figure()
+vals_all = []
+for tp in pick_exits:
+    d = dlines[tp]
+    vals_all += list(d.loc[d["month"] >= 0.5, "avg"].dropna())
+    dfig.add_trace(go.Scatter(x=d["month"], y=d["avg"], mode="lines", name=EXIT_LBL[tp],
+                              line=dict(width=4 if tp is None else 2.2, color=EXIT_COL.get(tp, "#777"),
+                                        dash="solid"), customdata=d["n"],
+                              hovertemplate="<b>%s</b><br>month %%{x:.1f}<br>avg daily profit %%{y:+.3f}%%<br>"
+                                            "%%{customdata} stocks with a closed trade<extra></extra>" % EXIT_LBL[tp]))
+dfig.add_hline(y=0, line_color="#999", line_width=1)
+for m in range(1, AXIS_MONTHS + 1):
+    dfig.add_vline(x=m, line_color="#ddd", line_width=1)
+yr = None
+if vals_all:                                    # early days are noisy (a 1-day trade = a huge daily %): scale on month 0.5+
+    lo, hi = np.percentile(vals_all, 1), np.percentile(vals_all, 99)
+    pad = (hi - lo) * 0.15 or 0.1
+    yr = [min(lo, 0) - pad, max(hi, 0) + pad]
+dfig.update_layout(height=560, margin=dict(l=10, r=10, t=40, b=10), hovermode="closest",
+                   title=dict(text="%s · Daily RRG on %s · %g%% stop-loss · %d stocks — average daily profit %%"
+                              % ("All stocks" if tag == "All" else tag, basis_txt, stop_loss, len(curves)), font=dict(size=15)),
+                   xaxis=dict(title="Months since the RRG chart started (month 0)", range=[0, AXIS_MONTHS], dtick=1),
+                   yaxis=dict(title="Average daily profit % (per day held)", ticksuffix="%", range=yr),
+                   legend=dict(font=dict(size=11)), plot_bgcolor="#fcfcfb", paper_bgcolor="#fcfcfb")
+st.plotly_chart(dfig, width="stretch", key="vin_daily_chart")
+# month-end values, one row per exit point
+mrows = []
+for tp in pick_exits:
+    d = dlines[tp]
+    row = {"Profit exit point": EXIT_LBL[tp]}
+    for mth in range(1, MAX_MONTHS + 1):
+        day = int(round(mth * MONTH_DAYS))
+        hit = d[(d["month"] * MONTH_DAYS).round() <= day]
+        v = hit["avg"].iloc[-1] if len(hit) else np.nan
+        row["M%d" % mth] = None if pd.isna(v) or hit["n"].iloc[-1] == 0 else round(float(v), 4)
+    row["Stocks at M6"] = int(d["n"].iloc[-1])
+    mrows.append(row)
+mt = pd.DataFrame(mrows)
+mcols_d = ["M%d" % m for m in range(1, MAX_MONTHS + 1)]
+st.dataframe(mt.style.map(lambda v: ("color:%s" % ("#2e7d32" if v > 0 else "#c62828" if v < 0 else "inherit"))
+                          if isinstance(v, (int, float)) and not pd.isna(v) else "", subset=mcols_d)
+             .format({c: "{:+.4f}" for c in mcols_d}, na_rep="—"), hide_index=True, width="stretch")
+st.caption("Average daily profit % at the end of each month after month 0 (— = no stock with a closed trade yet). "
+           "Early months average few trades, so they move a lot. The y-axis is scaled on month 0.5 onwards; hover a "
+           "line for its exact value and how many stocks it averages. Click a name in the legend to hide it.")
 
 # ---- trades in the first 6 months (same columns as the Tags analysis table) ------------------------
 def colour(v):

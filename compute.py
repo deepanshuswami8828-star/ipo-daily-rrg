@@ -91,7 +91,20 @@ def average_line(curves, col):
 
 def tp_stock(symbol, sma, stop_loss, cost, tp):
     """One stock, one stop-loss / take-profit setting, first 6 months -> dict or None (no RRG)."""
-    status, start, df, trs = vintage(symbol, sma, stop_loss, cost, tp)
+    return tp_summary(vintage(symbol, sma, stop_loss, cost, tp))
+
+
+def daily_series(v):
+    """From a vintage() result: (days since month 0 as int16, Tags-method daily profit % as float32) or None."""
+    status, _, df, _ = v
+    if status:
+        return None
+    return df["day"].to_numpy().astype(np.int16), df["daily"].to_numpy().astype(np.float32)
+
+
+def tp_summary(v):
+    """From a vintage() result: the take-profit chart numbers for one stock -> dict or None (no RRG)."""
+    status, start, df, trs = v
     if status:
         return None
     closed = in_window(trs, start)
