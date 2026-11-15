@@ -317,13 +317,10 @@ SL_COL = {10.0: "#2a78d6", 15.0: "#e65100"}
 GAP = 0.45                                         # x shift: 10% SL a little left, 15% SL a little right
 SL_SHIFT = {core.STOP_LOSS_OPTIONS[0]: -GAP, core.STOP_LOSS_OPTIONS[-1]: +GAP}
 SL_LIGHT = {10.0: "rgba(42,120,214,0.30)", 15.0: "rgba(230,81,0,0.30)"}
-show_st = st.toggle("Show every stock's line", value=True, key="vin_tp_stocks")
 lf = go.Figure()
 all_v = []
-for sl in core.STOP_LOSS_OPTIONS:                  # every stock: thin line in its stop-loss colour
+for sl in core.STOP_LOSS_OPTIONS:                  # every stock: thin line in its stop-loss colour (always shown)
     col, dx = SL_COL.get(sl, "#555"), SL_SHIFT.get(sl, 0)
-    if not show_st:
-        continue
     first = True
     for s in curves:
         ys = [val(per[sl][tp][s]) for tp in TAKE_PROFITS]
