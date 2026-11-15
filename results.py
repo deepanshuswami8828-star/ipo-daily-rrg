@@ -28,7 +28,7 @@ def fingerprint():
     h = hashlib.sha256()
     for f in ("rrg_core.py", "compute.py", "results.py"):
         with open(os.path.join(ROOT, f), "rb") as fh:
-            h.update(fh.read())
+            h.update(fh.read().replace(b"\r\n", b"\n"))      # same hash on Windows (CRLF) and Linux (LF)
     return h.hexdigest()[:16]
 
 
