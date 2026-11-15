@@ -25,10 +25,9 @@ QUAD_COLOR = {"Leading": "#2e8b57", "Weakening": "#e6a700", "Lagging": "#c0392b"
 def stock_rrg(symbol, sma, token):
     """(status, aligned prices, rrg) for one stock. status '' = ok."""
     try:
-        al, _ = core.aligned(symbol)
+        al, rrg, _ = core.rrg_for(symbol, sma)          # read and built once per data version
     except Exception:
         return ("NSE SME stock — add NSE CSV files" if INFO[symbol]["source"] == "nse_csv" else "No data"), None, None
-    rrg, _ = core.daily_rrg(al, sma)
     if rrg.empty:
         return "Only %d sessions — too few for RRG" % len(al), al, None
     return "", al, rrg

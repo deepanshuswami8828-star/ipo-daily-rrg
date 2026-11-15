@@ -15,7 +15,15 @@ The RRG can be built on the daily close or on an N-day SMA of price.
 - `vintage_analysis.py` - month 0-6 vintage view, take-profit analysis, realistic OHLCV replay
 - `rrg_core.py` - stock list and tags, data download, Daily RRG formula, strategy rules
 - `analysis.py` - stock profiles, search, validation, quadrant periods, cycles, rupee simulation
-- `data/` - saved daily prices (refreshed from Yahoo Finance once a day; used if a download fails)
+- `compute.py` - the Vintage page's heavy calculations (no Streamlit code)
+- `results.py`, `build_cache.py` - calculate the heavy results once and save them in `data/results.pkl.gz`
+- `data/` - saved daily prices and saved results
+
+**Speed:** pages never download or recalculate on load. Prices are read from the saved copies in `data/` and the
+heavy results from `data/results.pkl.gz`. Both are refreshed by `python build_cache.py --refresh`, which the
+GitHub Action `.github/workflows/refresh-data.yml` runs every weekday evening after the NSE close (and the app's
+*Refresh data now* button runs on demand). A saved file is used only if it matches the current code and data;
+any other setting is calculated live.
 
 Run locally: `streamlit run app.py`
 

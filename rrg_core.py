@@ -197,52 +197,96 @@ def _fetch(ticker):
     return d
 
 
+# Data is read from the saved CSV copies in data/. Nothing is downloaded while a page loads: the copies are
+# refreshed by build_cache.py (daily GitHub Action, or the app's "Refresh data now" button). A copy is
+# downloaded on the spot only when it does not exist yet (e.g. a newly added stock).
+_MEMO = {}          # in-process memo: (kind, key, file mtimes) -> result, so every file is read only once
+
+
+def _mtime(path):
+    return os.path.getmtime(path) if os.path.exists(path) else None
+
+
+def _read_saved(path, cols=None):
+    key = ("csv", path, _mtime(path))
+    if key not in _MEMO:
+        _MEMO[key] = pd.read_csv(path, parse_dates=["Date"], index_col="Date")
+    return _MEMO[key]
+
+
+def _saved_note(path):
+    try:
+        last = _read_saved(path).index[-1]
+        return "saved copy, data up to %s" % last.strftime("%d %b %Y")
+    except Exception:
+        return "saved copy"
+
+
 def get_prices(ticker, force=False):
-    """Open/Close for one ticker. Downloads once a day (or on force) and keeps a CSV copy;
-    if the download fails the saved copy is used. -> (frame, note)"""
+    """Open/Close for one ticker from its saved CSV copy; downloads only when forced or when there is no copy
+    yet (and falls back to the copy if a forced download fails). -> (frame, note)"""
     path = _csv(ticker)
-    fresh = os.path.exists(path) and \
-        datetime.fromtimestamp(os.path.getmtime(path)).date() == datetime.now().date()
-    if force or not fresh:
+    if force or not os.path.exists(path):
         try:
             d = _fetch(ticker)
             d.to_csv(path)
-            return d, "Yahoo Finance (downloaded now)"
+            return _read_saved(path).copy(), "Yahoo Finance (downloaded now)"
         except Exception as exc:
             if not os.path.exists(path):
                 raise RuntimeError("Download failed for %s and no saved copy: %s" % (ticker, exc))
-            note = "saved copy (download failed: %s)" % str(exc)[:60]
-    else:
-        note = "saved copy from today"
-    d = pd.read_csv(path, parse_dates=["Date"], index_col="Date")
-    return d, note
+            return _read_saved(path).copy(), "saved copy (download failed: %s)" % str(exc)[:60]
+    return _read_saved(path).copy(), _saved_note(path)
+
+
+def _fetch_ohlcv(ticker):
+    import yfinance as yf
+    d = yf.download(ticker, period="max", interval="1d", auto_adjust=True, progress=False)
+    if isinstance(d.columns, pd.MultiIndex):
+        d.columns = d.columns.get_level_values(0)
+    d = d[["Open", "High", "Low", "Close", "Volume"]].apply(pd.to_numeric, errors="coerce").dropna()
+    d.index = pd.to_datetime(d.index).tz_localize(None).normalize()
+    d = d[(d[["Open", "High", "Low", "Close"]] > 0).all(axis=1)]
+    d = d[~d.index.duplicated(keep="last")].sort_index()
+    d.index.name = "Date"
+    if d.empty:
+        raise ValueError("no rows")
+    return d
 
 
 def get_ohlcv(ticker, force=False):
-    """Open/High/Low/Close/Volume for the realistic trade replay. Kept in its own CSV copy
-    (data/<ticker>_ohlcv.csv) so the Open/Close data used by the RRG is not touched. -> frame"""
+    """Open/High/Low/Close/Volume for the realistic trade replay, from its own saved copy
+    (data/<ticker>_ohlcv.csv); downloads only when forced or missing. -> frame"""
     path = os.path.join(DATA, ticker.replace("^", "") + "_ohlcv.csv")
-    fresh = os.path.exists(path) and \
-        datetime.fromtimestamp(os.path.getmtime(path)).date() == datetime.now().date()
-    if force or not fresh:
+    if force or not os.path.exists(path):
         try:
-            import yfinance as yf
-            d = yf.download(ticker, period="max", interval="1d", auto_adjust=True, progress=False)
-            if isinstance(d.columns, pd.MultiIndex):
-                d.columns = d.columns.get_level_values(0)
-            d = d[["Open", "High", "Low", "Close", "Volume"]].apply(pd.to_numeric, errors="coerce").dropna()
-            d.index = pd.to_datetime(d.index).tz_localize(None).normalize()
-            d = d[(d[["Open", "High", "Low", "Close"]] > 0).all(axis=1)]
-            d = d[~d.index.duplicated(keep="last")].sort_index()
-            d.index.name = "Date"
-            if d.empty:
-                raise ValueError("no rows")
-            d.to_csv(path)
-            return d
+            _fetch_ohlcv(ticker).to_csv(path)
         except Exception:
             if not os.path.exists(path):
                 raise
-    return pd.read_csv(path, parse_dates=["Date"], index_col="Date")
+    return _read_saved(path).copy()
+
+
+def refresh_all(log=print, ohlcv=True):
+    """Download fresh prices for NIFTY 50 and every Yahoo stock (and the OHLCV copies). -> {ticker: error}"""
+    errors = {}
+    tickers = [BENCH_TICKER] + [INFO[s]["ticker"] for s, _ in STOCKS if INFO[s]["source"] == "yahoo"]
+    for i, t in enumerate(tickers, 1):
+        for kind, fn in [("prices", lambda: _fetch(t).to_csv(_csv(t)))] +                         ([("ohlcv", lambda: _fetch_ohlcv(t).to_csv(os.path.join(DATA, t.replace("^", "") + "_ohlcv.csv")))]
+                         if ohlcv and t != BENCH_TICKER else []):
+            try:
+                fn()
+            except Exception as exc:
+                errors["%s %s" % (t, kind)] = str(exc)[:80]
+        log("refreshed %d/%d %s" % (i, len(tickers), t))
+    return errors
+
+
+def data_through():
+    """Last session in the saved NIFTY 50 copy (the data date every saved result is built on)."""
+    try:
+        return _read_saved(_csv(BENCH_TICKER)).index[-1]
+    except Exception:
+        return None
 
 
 MANUAL = os.path.join(DATA, "nse_csv")
@@ -279,15 +323,38 @@ def nse_csv_prices(symbol):
 
 
 def aligned(symbol, force=False):
-    """Stock Open/Close + NIFTY 50 Close on the dates both traded (inner join, no fill)."""
+    """Stock Open/Close + NIFTY 50 Close on the dates both traded (inner join, no fill).
+    Read once per data version (memo keyed by the files' modification times)."""
     info = INFO[symbol]
+    if force and info["source"] == "yahoo":
+        get_prices(info["ticker"], force=True)
+        get_prices(BENCH_TICKER, force=True)
     if info["source"] == "nse_csv":
-        s, note = nse_csv_prices(symbol)
+        import glob
+        files = tuple(sorted(glob.glob(os.path.join(MANUAL, symbol + "*.csv"))))
+        version = tuple(_mtime(f) for f in files)
     else:
-        s, note = get_prices(info["ticker"], force)
-    b, _ = get_prices(BENCH_TICKER, force)
-    al = s.join(b[["Close"]].rename(columns={"Close": "Bench"}), how="inner").dropna()
-    return al, note
+        version = (_mtime(_csv(info["ticker"])),)
+    key = ("al", symbol, version, _mtime(_csv(BENCH_TICKER)))
+    if key not in _MEMO:
+        if info["source"] == "nse_csv":
+            s, note = nse_csv_prices(symbol)
+        else:
+            s, note = get_prices(info["ticker"])
+        b, _ = get_prices(BENCH_TICKER)
+        _MEMO[key] = (s.join(b[["Close"]].rename(columns={"Close": "Bench"}), how="inner").dropna(), note)
+    al, note = _MEMO[key]
+    return al.copy(), note
+
+
+def rrg_for(symbol, sma=0):
+    """(aligned prices, Daily RRG, warm-up) for one stock, built once per data version."""
+    al, _ = aligned(symbol)
+    key = ("rrg", symbol, sma, len(al), al.index[-1] if len(al) else None, float(al["Close"].iloc[-1]) if len(al) else 0)
+    if key not in _MEMO:
+        _MEMO[key] = daily_rrg(al, sma)
+    rrg, warm = _MEMO[key]
+    return al, rrg.copy(), warm
 
 
 # ---- Daily RRG ----------------------------------------------------------------

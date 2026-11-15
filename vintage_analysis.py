@@ -13,76 +13,28 @@ from plotly.subplots import make_subplots
 import streamlit as st
 
 import analysis as an
+import compute as cp
+import results as RES
 import rrg_core as core
 from rrg_core import INFO
 
-MONTH_DAYS = 30.4375
-MAX_MONTHS = 6              # data window: month 0 to 6
-TAKE_PROFITS = [5, 7, 10, 12, 15, 17, 20, 25, 30]   # profit exit points (%) on the take-profit chart
+MONTH_DAYS, MAX_MONTHS, TAKE_PROFITS = cp.MONTH_DAYS, cp.MAX_MONTHS, cp.TAKE_PROFITS
 AXIS_MONTHS = 12            # x-axis shown: month 0 to 12
 PAL = ["#2a78d6", "#eb6834", "#2e9e83", "#9b59b6", "#c0392b", "#16a085", "#d35400", "#7f8c8d", "#8e44ad",
        "#27ae60", "#e67e22", "#34495e", "#1abc9c", "#f39c12", "#2980b9", "#b03a2e", "#6c5ce7", "#00897b",
        "#795548", "#5d6d7e", "#ad1457", "#558b2f", "#0277bd", "#ff8f00", "#4e342e", "#283593"]
+in_window, average_line = cp.in_window, cp.average_line
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, max_entries=4000)
 def vintage(symbol, sma, stop_loss, cost, token, take_profit=None):
-    """(status, start date, DataFrame[day, month, strategy %, buy&hold %], trades) for the first 6 months."""
-    try:
-        al, _ = core.aligned(symbol)
-    except Exception:
-        return ("NSE SME stock — add NSE CSV files" if INFO[symbol]["source"] == "nse_csv" else "No data"), None, None, []
-    rrg, _ = core.daily_rrg(al, sma)
-    if rrg.empty:
-        return "Only %d sessions — too few for RRG" % len(al), None, None, []
-    trades, _, _ = core.run_strategy(rrg, stop_loss, cost, take_profit)
-    start = rrg.index[0]
-    end = start + pd.Timedelta(days=round(MAX_MONTHS * MONTH_DAYS))
-    close = rrg["Close"]
-    k = cost / 100.0
-    curve, v = pd.Series(1.0, index=rrg.index), 1.0
-    for t in trades:                                    # mark to market, charges in
-        e = t["sell"] if t["sell"] is not None else rrg.index[-1]
-        curve.loc[t["buy"]:e] = v * close.loc[t["buy"]:e] * (1 - k) / (t["buy_px"] * (1 + k))
-        v *= 1 + t["ret"] / 100.0
-        if t["sell"] is not None:
-            curve.loc[e:] = v
-    win = curve[curve.index <= end]
-    days = (win.index - start).days
-    df = pd.DataFrame({"day": days, "month": days / MONTH_DAYS, "strategy": 100 * (win.to_numpy() - 1),
-                       "buyhold": 100 * (close[win.index].to_numpy() / close.iloc[0] - 1)}, index=win.index)
-    # daily profit % (Tags method) up to each day: closed trades so far (bought and sold inside the window),
-    # sum of profit % / sum of calendar days held in those trades
-    psum, dsum, daily = 0.0, 0, pd.Series(np.nan, index=win.index)
-    for t in sorted((t for t in trades if t["sell"] is not None and not t["open"] and t["buy"] >= start
-                     and t["sell"] <= end), key=lambda t: t["sell"]):
-        psum += t["ret"]
-        dsum += int((t["sell"] - t["buy"]).days)
-        if dsum > 0:
-            daily.loc[t["sell"]:] = psum / dsum
-    df["daily"] = daily.to_numpy()
-    return "", start, df, [t for t in trades if t["buy"] <= end]
+    """compute.vintage, cached per session settings (fast: prices and RRG are read/built once)."""
+    return cp.vintage(symbol, sma, stop_loss, cost, take_profit)
 
 
-def in_window(trades, start):
-    """Closed trades bought AND sold between month 0 and month 6 (the vintage window)."""
-    end = start + pd.Timedelta(days=round(MAX_MONTHS * MONTH_DAYS))
-    return [t for t in trades if not t["open"] and t["sell"] is not None and start <= t["buy"] and t["sell"] <= end]
-
-
-def average_line(curves, col):
-    """Average over stocks on a calendar-day grid 0..6 months; a stock counts only up to its last session."""
-    grid = np.arange(0, int(MAX_MONTHS * MONTH_DAYS) + 1)
-    vals, n = [], []
-    for d in grid:
-        pts = []
-        for df in curves.values():
-            if df["day"].iloc[-1] >= d:
-                pts.append(df.loc[df["day"] <= d, col].iloc[-1])
-        pts = [p for p in pts if not pd.isna(p)]
-        vals.append(float(np.mean(pts)) if pts else np.nan)
-        n.append(len(pts))
-    return pd.DataFrame({"month": grid / MONTH_DAYS, "avg": vals, "n": n})
+def saved_ok(sma, cost):
+    """True when this setting is in the saved results (daily close or SMA 14, default charges)."""
+    return sma in RES.SMAS and RES.is_default_cost(cost)
 
 
 # ---- page -------------------------------------------------------------------------------------
@@ -90,6 +42,12 @@ st.title("📅 Vintage chart — month 0 to 6 of the RRG")
 st.caption("Each stock on its own clock: **month 0 = the day its Daily RRG chart starts** (first RRG session after the "
            "warm-up), up to month 6. Line = the Daily RRG strategy's cumulative profit %, marked to market every day.")
 token = st.session_state.get("token", 0)
+_m = RES.meta()
+st.caption(("⚡ Using results saved on %s (data up to %s) — settings other than daily close / SMA %d with %.2f%% "
+            "charges are calculated live." % (_m["built_at"], _m["data_through"].strftime("%d %b %Y"), core.SMA_DEFAULT,
+                                               core.COST_PCT)) if _m else
+           "⏳ No saved results for the current data — calculating live (slower). Run build_cache.py or press "
+           "*Refresh data now* on the RRG charts page to save them.")
 
 c1, c2, c3, c4, c5 = st.columns([2.2, 1.6, 0.9, 1.2, 1])
 tag = c1.selectbox("Tag", ["All"] + core.TAGS, key="vin_tag",
@@ -231,18 +189,13 @@ st.caption("Closed trades bought and sold within the first 6 months after month 
 
 # ---- take-profit exit points x stop-loss -----------------------------------------------------------
 def tp_stock(s, sma, stop_loss, cost, token, tp):
-    """One stock, one setting: profit % at month 6 / latest, daily profit % (per day), daily % (Tags method),
-    trades and take-profit exits — first 6 months."""
-    status, start, df, trs = vintage(s, sma, stop_loss, cost, token, tp)
-    if status:
-        return None
-    closed = in_window(trs, start)
-    d = sum(int((t["sell"] - t["buy"]).days) for t in closed)
-    return {"final": float(df["strategy"].iloc[-1]),
-            "daily": None if pd.isna(df["daily"].iloc[-1]) else float(df["daily"].iloc[-1]),
-            "tag": sum(t["ret"] for t in closed) / d if d > 0 else None,
-            "trades": len(trs), "tp_hits": sum(1 for t in closed if t.get("take_profit")),
-            "closed": len(closed), "days": d}
+    """Saved result when available, else calculated (compute.tp_stock)."""
+    if saved_ok(sma, cost):
+        key = ("tp", s, sma, stop_loss, tp)
+        hit = RES.get(key, "missing")
+        if hit != "missing":
+            return hit
+    return cp.tp_stock(s, sma, stop_loss, cost, tp)
 
 
 st.markdown("---")
@@ -430,28 +383,13 @@ for tab, sl in zip(st.tabs(["%g%% stop-loss" % sl for sl in core.STOP_LOSS_OPTIO
 
 # ---- rule check: a stop-loss that comes first is taken, the take-profit is then never taken ----------
 def rule_check():
-    checked = bad = stops = tps = 0
-    for sl in core.STOP_LOSS_OPTIONS:
-        for tp in TAKE_PROFITS:
-            for s in curves:
-                status, _, df, trs = vintage(s, sma, sl, cost, token, tp)
-                if status:
-                    continue
-                al_s, _ = core.aligned(s)
-                c = al_s["Close"]
-                for t in trs:
-                    if t["open"] or t["sell"] is None:
-                        continue
-                    checked += 1
-                    stop_px, tgt = t["buy_px"] * (1 - sl / 100.0), t["buy_px"] * (1 + tp / 100.0)
-                    before = c[(c.index > t["buy"]) & (c.index < t["sell"])]
-                    if t.get("stop"):
-                        stops += 1
-                        bad += int((before >= tgt).any())
-                    elif t.get("take_profit"):
-                        tps += 1
-                        bad += int((before <= stop_px).any())
-    return checked, stops, tps, bad
+    tot = [0, 0, 0, 0]
+    for s in curves:
+        r = RES.get(("rule", s, sma)) if saved_ok(sma, cost) else None
+        if r is None:
+            r = cp.rule_check_stock(s, sma, cost)
+        tot = [a + b for a, b in zip(tot, r)]
+    return tuple(tot)
 
 
 with st.spinner("Checking the stop-loss / take-profit order on every trade..."):
@@ -481,22 +419,17 @@ ramt = r4.number_input("₹ per trade", 1000.0, 1e8, 100000.0, 10000.0, format="
 
 @st.cache_data(show_spinner=False)
 def replay(symbol, sma, tp, sl, cost, amount, only6, token):
-    try:
-        px = core.get_ohlcv(INFO[symbol]["ticker"])
-        al_s, _ = core.aligned(symbol)
-    except Exception as exc:
-        return None, "no OHLCV data (%s)" % str(exc)[:60]
-    rrg_s, _ = core.daily_rrg(al_s, sma)
-    if rrg_s.empty:
-        return None, "too few sessions"
-    if only6:
-        end6 = rrg_s.index[0] + pd.Timedelta(days=round(MAX_MONTHS * MONTH_DAYS))
-        rrg_s = rrg_s[rrg_s.index <= end6]
-        px = px[px.index <= end6]
-    return core.replay_realistic(rrg_s, px, tp, sl, cost, amount), ""
+    d = cp.REPLAY_DEFAULT
+    if saved_ok(sma, cost) and (tp, sl, amount, only6) == (d["tp"], d["sl"], d["amount"], d["only6"]):
+        hit = RES.get(("replay", symbol, sma))
+        if hit is not None:
+            return hit
+    return cp.replay(symbol, sma, tp, sl, cost, amount, only6)
 
 
-if not st.toggle("▶ Run the realistic replay", value=False, key="rp_run",
+_dflt = cp.REPLAY_DEFAULT
+_rp_saved = saved_ok(sma, cost) and bool(RES.meta()) and (rtp, rsl, ramt, r6m) == (_dflt["tp"], _dflt["sl"], _dflt["amount"], _dflt["only6"])
+if not st.toggle("▶ Run the realistic replay", value=_rp_saved, key="rp_run",
                  help="Downloads daily Open/High/Low/Close/Volume for every stock shown (about a minute the first "
                       "time each day for the whole list; search for one stock to make it quick)."):
     st.info("Switch on **Run the realistic replay** to replay the %d stocks shown above with real orders and see the "

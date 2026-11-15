@@ -23,6 +23,7 @@ import streamlit as st
 from plotly.subplots import make_subplots
 
 import analysis as an
+import results as rs
 import rrg_core as core
 from rrg_core import (INFO, STOCKS, QUAD_BG, QUAD_FG, SURFACE, INK_1, INK_2, INK_3, GRID, SERIES,
                       ORDER, BENCH, UP)
@@ -77,7 +78,7 @@ def status_box(color, title, lines):
 # ---- data (cached) ------------------------------------------------------------
 @st.cache_data(show_spinner="Loading prices...")
 def load(symbol, token, sma=0):
-    al, note = core.aligned(symbol, force=token > 0)
+    al, note = core.aligned(symbol)        # saved copy; refreshed by build_cache.py / the Refresh button
     rrg, warm = core.daily_rrg(al, sma)
     return al, rrg, warm, note, an.now_ist()
 
@@ -431,9 +432,27 @@ with st.sidebar:
     capital = st.number_input("Amount (₹)", 1000.0, 1e8, 100000.0, 10000.0, format="%.0f")
     stop_loss = st.radio("Stop-loss", core.STOP_LOSS_OPTIONS, horizontal=True, format_func=lambda v: "%g%%" % v)
     cost = st.number_input("Charges per side (%)", 0.0, 1.0, core.COST_PCT, 0.01)
-    if st.button("Refresh data now", width="stretch"):
+    if st.button("Refresh data now", width="stretch",
+                 help="Downloads the latest prices for every stock and recalculates the saved results "
+                      "(about 1-2 minutes). This also runs by itself every weekday evening."):
+        bar = st.progress(0.0, text="Downloading prices...")
+        n = len(STOCKS) + 1
+        state = {"i": 0}
+
+        def _log(msg):
+            if msg.startswith("refreshed"):
+                state["i"] += 1
+                bar.progress(min(state["i"] / n, 1.0) * 0.8, text="Downloading prices... " + msg.split(" ", 1)[1])
+            else:
+                bar.progress(0.85, text=msg)
+        rs.build(refresh=True, log=_log)
+        bar.progress(1.0, text="Done")
+        st.cache_data.clear()
         st.session_state.token += 1
-    st.caption("Benchmark: NIFTY 50 (^NSEI). Data: Yahoo Finance daily, auto-adjusted.")
+    _m = rs.meta()
+    st.caption("Benchmark: NIFTY 50 (^NSEI). Data: Yahoo Finance daily, auto-adjusted. "
+               + ("Data up to **%s** · results saved %s." % (_m["data_through"].strftime("%d %b %Y"), _m["built_at"])
+                  if _m else "Saved results: not built for this data yet."))
 
 token = st.session_state.token
 
